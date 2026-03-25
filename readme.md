@@ -1,0 +1,1 @@
+Init with the 'ai-intern', a model agnostic AI coding assistant tool.  
