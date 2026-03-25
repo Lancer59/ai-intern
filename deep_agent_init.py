@@ -12,7 +12,8 @@ def initialize_deep_agent():
     Initializes a DeepAgent using the deepagents library with all available parameters.
     Configured with FilesystemBackend to persist tasks to the 'agent_data' folder.
     """
-    from deepagents import create_deep_agent, FilesystemBackend
+    from deepagents import create_deep_agent
+    from deepagents.backends import FilesystemBackend
     
     # 1. Get the LLM from our factory
     # User updated this to Azure (consistent with their last edit)
@@ -25,8 +26,6 @@ def initialize_deep_agent():
 
     tools = [my_tool]
 
-    # 3. Initialize the FilesystemBackend for persistence
-    # This will save todo lists and other tasks to the 'agent_data' folder
     backend = FilesystemBackend(root_dir="./agent_data")
 
     # 4. Initialize the DeepAgent
@@ -34,7 +33,7 @@ def initialize_deep_agent():
         tools=tools,
         system_prompt="You are a helpful assistant capable of multi-step planning and file system operations.", # Using system_prompt as per user edit
         model=llm,
-        backends=backend,                 # Set the backend for persistence
+        backend=backend,                 # Set the backend for persistence (singular)
         # subagents=[],                   
         # middleware=[],                  
         # tool_configs={},                
