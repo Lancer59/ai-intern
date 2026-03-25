@@ -31,6 +31,8 @@ ENV/
 
 # Agent Data / Persistence
 agent_data/
+deepagents_data/
+deepagents_data
 
 # IDEs
 .vscode/
@@ -39,3 +41,8 @@ agent_data/
 # System Files
 .DS_Store
 Thumbs.db
+
+# Chainlit
+.chainlit/
+.files/
+chainlit.md

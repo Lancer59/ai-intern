@@ -2,6 +2,10 @@ import os
 from llm_factory import get_llm
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
+from langgraph.checkpoint.memory import MemorySaver
+
+# Single shared checkpointer instance for in-memory persistence
+memory_saver = MemorySaver()
 
 
 def create_coding_assistant(workspace_path: str):
@@ -25,15 +29,21 @@ def create_coding_assistant(workspace_path: str):
     backend = FilesystemBackend(root_dir="..", virtual_mode=True)
 
     # 3. Define the detailed system prompt for a coding assistant
+    # We clarify the directory structure for the agent
+    agent_folder = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+    repo_folder = os.path.basename(workspace_path)
+
     system_prompt = f"""You are a world-class AI Software Engineer. 
-You are currently working in the directory: {workspace_path} which is where all the code is present. 
+
+Environment Mapping:
+- Your virtual filesystem root '/' is the parent directory of both this assistant and the target repository.
+- Assistant logs/data: '/{agent_folder}/'
+- Target Code Repository: '/{repo_folder}/' (This is where you should make changes!)
 
 Filesystem & Paths:
-- ALWAYS use relative paths
-- NEVER use Windows absolute paths (e.g., 'C:\\Users\\...') as they are not supported by the environment.
-
-Capabilities:
-- You have full access to the filesystem via tools like ls, read_file, write_file, edit_file.
+- ALWAYS use relative paths to access the code (e.g., '{repo_folder}/src/main.py').
+- NEVER use Windows absolute paths (e.g., 'C:\\Users\\...') as they are not supported.
+- Use 'grep' for efficient keyword searches across the project to find specific file and line numbers quickly.
 - You can execute shell commands via the 'execute' tool.
 - You should use 'write_todos' to PLAN your work before making any changes.
 - You can spawn sub-agents for specialized tasks like writing documentation or specific unit tests.
@@ -51,6 +61,7 @@ Rules:
         model=llm,
         system_prompt=system_prompt,
         backend=backend,
+        checkpointer=memory_saver,
         # tools=[], # Add custom tools here if needed
     )
 

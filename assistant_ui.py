@@ -1,0 +1,184 @@
+import chainlit as cl
+import os
+import asyncio
+import logging
+import uuid
+from coding_assistant import create_coding_assistant
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("AssistantUI")
+
+@cl.on_chat_start
+async def start():
+    # 1. Ask for workspace folder name to construct the path
+    res = await cl.AskUserMessage(content="Enter the project folder name (sibling to ai-intern):").send()
+    if res:
+        project_folder = res['output'].strip()
+        
+        # Calculate full path relative to parent directory
+        # D:\...\ALLPROJECTS\ai-intern -> D:\...\ALLPROJECTS\
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        workspace = os.path.join(parent_dir, project_folder)
+        workspace = os.path.abspath(workspace)
+
+        cl.user_session.set("workspace", workspace)
+        
+        try:
+            # Create the agent using our helper
+            agent = create_coding_assistant(workspace)
+            cl.user_session.set("agent", agent)
+            
+            # Generate a unique thread_id for this session's memory
+            thread_id = str(uuid.uuid4())
+            cl.user_session.set("thread_id", thread_id)
+            logger.info(f"Session started with thread_id: {thread_id}")
+            
+            # Persistent TaskList for the sidebar
+            task_list = cl.TaskList()
+            await task_list.send()
+            cl.user_session.set("task_list", task_list)
+
+            await cl.Message(content=f"🚀 AI Coding Assistant ready for: **{workspace}**").send()
+        except Exception as e:
+            await cl.Message(content=f"❌ Error initializing agent: {e}").send()
+
+@cl.on_message
+async def main(message: cl.Message):
+    agent = cl.user_session.get("agent")
+    task_list = cl.user_session.get("task_list")
+    thread_id = cl.user_session.get("thread_id")
+    
+    if not agent:
+        await cl.Message(content="Session expired or agent not ready. Please refresh.").send()
+        return
+
+    # 1. Initialize Thinking Placeholder
+    stream_msg = cl.Message(content="Thinking...")
+    await stream_msg.send()
+    
+    full_content = ""
+    active_steps = {}
+    all_steps = []
+
+    try:
+        # 2. Run the agent with astream_events
+        input_data = {"messages": [("user", message.content)]}
+        logger.info(f"Starting agent with input: {message.content}")
+        config = {"recursion_limit": 200, "configurable": {"thread_id": thread_id}}
+        async for event in agent.astream_events(input_data, version="v2", config=config):
+            kind = event["event"]
+            run_id = event["run_id"]
+            logger.debug(f"Event: {kind} | RunID: {run_id}")
+
+            # Stream tokens
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content:
+                    if not full_content:
+                        stream_msg.content = ""
+                    full_content += content
+                    await stream_msg.stream_token(content)
+
+            # Tool steps
+            elif kind == "on_tool_start":
+                logger.info(f"Tool Start: {event['name']}")
+                step = cl.Step(name=f"Tool: {event['name']}", type="tool", parent_id=stream_msg.id)
+                tool_input = event["data"].get("input")
+                step.input = str(tool_input) if tool_input else ""
+                await step.send()
+                active_steps[run_id] = step
+                all_steps.append(step)
+
+            elif kind == "on_tool_end":
+                step = active_steps.get(run_id)
+                tool_output = event["data"].get("output")
+                if step:
+                    str_output = str(tool_output)
+                    if len(str_output) > 500:
+                        str_output = str_output[:500] + "..."
+                    step.output = str_output
+                    await step.update()
+                    del active_steps[run_id]
+
+                # Real-time todos
+                if event["name"] == "write_todos" and tool_output:
+                    todos = None
+                    if hasattr(tool_output, "update") and isinstance(tool_output.update, dict) and "todos" in tool_output.update:
+                        todos = tool_output.update["todos"]
+                    elif isinstance(tool_output, dict) and "todos" in tool_output:
+                        todos = tool_output["todos"]
+                    if todos:
+                        await update_task_list(todos)
+
+            elif kind == "on_tool_error":
+                error_msg = event["data"].get("error", "Unknown tool error")
+                logger.error(f"Tool Error ({event.get('name')}): {error_msg}")
+                step = active_steps.get(run_id)
+                if step:
+                    step.output = f"❌ Error: {error_msg}"
+                    await step.update()
+
+            elif kind == "on_chain_error":
+                error_msg = event["data"].get("error", "Unknown chain error")
+                logger.error(f"Chain Error: {error_msg}")
+                await cl.Message(content=f"🚨 Backend Error: {error_msg}").send()
+
+            # Final response fallback
+            elif kind == "on_chain_end":
+                logger.info("Chain Ended")
+                try:
+                    output = event["data"].get("output")
+                    if output and isinstance(output, dict):
+                        if "todos" in output:
+                            await update_task_list(output["todos"])
+                        
+                        if not full_content and "messages" in output:
+                            messages = output["messages"]
+                            if hasattr(messages, "value"): messages = messages.value
+                            if isinstance(messages, list) and messages:
+                                last_msg = messages[-1]
+                                is_ai = (hasattr(last_msg, "type") and last_msg.type == "ai") or \
+                                         (isinstance(last_msg, dict) and (last_msg.get("type") == "ai" or last_msg.get("role") == "assistant"))
+                                if is_ai:
+                                    final_text = getattr(last_msg, "content", "") if not isinstance(last_msg, dict) else last_msg.get("content", "")
+                                    if final_text:
+                                        full_content = final_text
+                except Exception:
+                    pass
+
+    finally:
+        # 3. Final UI cleanup
+        if full_content:
+            stream_msg.content = full_content
+            await stream_msg.update()
+        elif stream_msg.content == "Thinking...":
+            stream_msg.content = "No text summary provided."
+            await stream_msg.update()
+            
+        # Completely remove all tool steps from the UI once the AI finishes responding
+        for step in all_steps:
+            try:
+                await step.remove()
+            except Exception as e:
+                logger.debug(f"Failed to remove step {step.name}: {e}")
+
+async def update_task_list(todos):
+    """Helper to refresh the sidebar TaskList"""
+    task_list = cl.TaskList()
+    for todo in todos:
+        if not isinstance(todo, dict): continue
+        title = todo.get("content", todo.get("title", "Untitled Task"))
+        raw_status = todo.get("status", "pending")
+        if raw_status == "done": status = cl.TaskStatus.DONE
+        elif raw_status == "in_progress": status = cl.TaskStatus.RUNNING
+        else: status = cl.TaskStatus.READY
+        task = cl.Task(title=str(title), status=status)
+        await task_list.add_task(task)
+    try:
+        await task_list.send()
+    except Exception:
+        pass
+
+# To run: chainlit run assistant_ui.py
