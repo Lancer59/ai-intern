@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import uuid
+import base64
 from coding_assistant import create_coding_assistant
 
 # Configure logging
@@ -55,7 +56,28 @@ async def main(message: cl.Message):
         await cl.Message(content="Session expired or agent not ready. Please refresh.").send()
         return
 
-    # 1. Initialize Thinking Placeholder
+    # 1. Prepare message content (multi-modal support for images)
+    content = [{"type": "text", "text": message.content or ""}]
+    
+    for element in message.elements:
+        if "image" in element.mime:
+            image_data = None
+            if element.content:
+                image_data = element.content
+            elif element.path and os.path.exists(element.path):
+                with open(element.path, "rb") as f:
+                    image_data = f.read()
+            
+            if image_data:
+                base64_image = base64.b64encode(image_data).decode("utf-8")
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{element.mime};base64,{base64_image}"
+                    }
+                })
+
+    # 2. Initialize Thinking Placeholder
     stream_msg = cl.Message(content="Thinking...")
     await stream_msg.send()
     
@@ -66,9 +88,9 @@ async def main(message: cl.Message):
     pending_commands = {}  # Capture execute tool commands for terminal rendering
 
     try:
-        # 2. Run the agent with astream_events
-        input_data = {"messages": [("user", message.content)]}
-        logger.info(f"Starting agent with input: {message.content}")
+        # 3. Run the agent with astream_events
+        input_data = {"messages": [("user", content)]}
+        logger.info(f"Starting agent with input: {message.content} (plus {len(content)-1} images)")
         config = {"recursion_limit": 200, "configurable": {"thread_id": thread_id}}
         async for event in agent.astream_events(input_data, version="v2", config=config):
             kind = event["event"]
