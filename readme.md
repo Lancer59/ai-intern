@@ -8,7 +8,9 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 
 - **Multi-Provider LLM Support** — Azure OpenAI, OpenAI, Google Gemini, and local Ollama models via a unified factory.
 - **Deep Agent** — Powered by `deepagents` with built-in planning (`write_todos`), filesystem tools (`ls`, `read_file`, `write_file`, `edit_file`, `grep`, `glob`), shell execution, and sub-agent spawning.
-- **Chainlit Web UI** — Real-time token streaming, collapsible tool steps, and a dynamic **Tasks** sidebar that updates as the agent plans.
+- **Model Context Protocol (MCP)** — Native integration via `langchain_mcp_adapters` to connect standard MCP servers (e.g., Microsoft Docs) for extended context.
+- **Custom Tooling Extensibility** — Includes robust custom tools (such as `think` for deep reasoning) loaded directly into the agent mapping.
+- **Chainlit Web UI** — Real-time token streaming, custom aesthetic tool step indicators ("Editing...", "Thinking..."), inline visual Diff and Terminal blocks, and a dynamic **Tasks** sidebar.
 - **In-Memory Persistence** — Conversation memory is maintained across turns within a session via LangGraph's `MemorySaver` checkpointer with unique `thread_id`s.
 - **CLI Mode** — Lightweight terminal interface for quick interactions.
 
@@ -20,11 +22,14 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 ai-intern/
 ├── llm_factory.py           # Multi-provider LLM initialization
 ├── coding_assistant.py      # DeepAgent configuration & system prompt
+├── mcp_client.py            # Model Context Protocol server configuration
+├── tools.py                 # Custom Langchain tools (e.g., think)
 ├── assistant_ui.py          # Chainlit web UI (main entry point)
 ├── assistant_cli.py         # CLI interface (alternative)
 ├── .env.example             # Template for API keys
 ├── requirements-simple.txt  # Core dependencies
 ├── requirements.txt         # Full pip freeze
+├── architecture.md          # Architectural overview, diagram, and usecases 
 └── readme.md
 ```
 
@@ -114,11 +119,10 @@ memory_saver = SqliteSaver("agent_memory.db")
 
 ---
 
-## Roadmap
+## ToDO
 
 - [ ] Persistent memory with SQLite/Postgres for production
-- [ ] Custom tools (linting, testing, dependency analysis)
-- [ ] Multi-file diff viewer in the UI
+- [ ] Custom tools extension (Started: implemented `think` & MCP integration)
 - [ ] Docker-based sandboxed execution
 - [ ] Project-level `AGENTS.md` for persistent context
 - [ ] Agent skills which can be added dynamically.

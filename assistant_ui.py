@@ -27,11 +27,18 @@ async def start():
         cl.user_session.set("workspace", workspace)
         
         try:
+            # Show status messages to keep user engaged
+            msg = cl.Message(content="🏗️ Creating agents...")
+            await msg.send()
+            
+            await asyncio.sleep(0.8)
+            msg.content = "🔧 Loading tools into agent..."
+            await msg.update()
+
             # Create the agent using our helper (now async to load MCP tools)
             agent = await create_coding_assistant(workspace)
             cl.user_session.set("agent", agent)
 
-            
             # Generate a unique thread_id for this session's memory
             thread_id = str(uuid.uuid4())
             cl.user_session.set("thread_id", thread_id)
@@ -41,8 +48,10 @@ async def start():
             task_list = cl.TaskList()
             await task_list.send()
             cl.user_session.set("task_list", task_list)
-
-            await cl.Message(content=f"🚀 AI Coding Assistant ready for: **{workspace}**").send()
+            
+            # Final ready message
+            msg.content = f"🚀 AI Coding Assistant ready for: **{workspace}**"
+            await msg.update()
         except Exception as e:
             await cl.Message(content=f"❌ Error initializing agent: {e}").send()
 
@@ -121,6 +130,7 @@ async def main(message: cl.Message):
                     "grep_search": "Searching...",
                     # "find_by_name": "Searching...",
                     "write_todos": "Updating todos...",
+                    "think": "Thinking...",
                 }
                 display_name = f"{display_map.get(tool_name, f'Tool: {tool_name}')} {tool_input or ''}"
                 

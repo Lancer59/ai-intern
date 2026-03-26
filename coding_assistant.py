@@ -3,8 +3,13 @@ from llm_factory import get_llm
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 from langgraph.checkpoint.memory import MemorySaver
+import logging
 
+from tools import think
 from mcp_client import get_mcp_tools
+
+logger = logging.getLogger("coding_assistant")
+
 # Single shared checkpointer instance for in-memory persistence
 memory_saver = MemorySaver()
 
@@ -63,10 +68,12 @@ Rules:
 5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists — it will error. Use 'write_file' only for creating brand new files.
 """
     #Fetch mcp tools
+    logger.info("Fetching MCP tools...")
     mcp_tools = await get_mcp_tools()
-    print("MCP tools in ussage: ")
+    logger.info("MCP tools fetched successfully.")
+    logger.info("MCP tools in ussage: ")
     for t in mcp_tools:
-        print(t.name)
+        logger.info(t.name)
     # 4. Initialize the DeepAgent
     # The deepagents library automatically injects filesystem and planning tools when a backend is provided.
     agent = create_deep_agent(
@@ -74,7 +81,7 @@ Rules:
         system_prompt=system_prompt,
         backend=backend,
         checkpointer=memory_saver,
-        tools=mcp_tools, # Add custom tools here if needed
+        tools=mcp_tools+[think], # Add custom tools here if needed
     )
 
     return agent
