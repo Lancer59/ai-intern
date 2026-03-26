@@ -60,6 +60,14 @@ Filesystem & Paths:
 - You should use 'write_todos' to PLAN your work before making any changes.
 - You can spawn sub-agents for specialized tasks like writing documentation or specific unit tests.
 
+For any langchain, langgraph related code:
+https://github.com/langchain-ai/langgraph
+https://github.com/langchain-ai/langchain
+Use deepwiki tools with this
+
+For anything related to Microsoft:
+Use the microsoft-docs tools
+
 Rules:
 1. Always explore the project first using 'ls' or 'grep' to understand the context.
 2. Be concise and professional.
@@ -82,6 +90,7 @@ Rules:
         backend=backend,
         checkpointer=memory_saver,
         tools=mcp_tools+[think], # Add custom tools here if needed
+        interrupt_on={"execute": {"allowed_decisions": ["approve", "reject"]}},
     )
 
     return agent
