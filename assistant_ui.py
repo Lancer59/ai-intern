@@ -62,6 +62,7 @@ async def main(message: cl.Message):
     active_steps = {}
     all_steps = []
     pending_edits = {}  # Capture edit_file inputs for diff rendering
+    pending_commands = {}  # Capture execute tool commands for terminal rendering
 
     try:
         # 2. Run the agent with astream_events
@@ -107,6 +108,9 @@ async def main(message: cl.Message):
                         "file_path": tool_input.get("file_path", ""),
                         "content": tool_input.get("content", ""),
                     }
+                # Capture execute command for terminal rendering
+                elif event["name"] == "execute" and isinstance(tool_input, dict):
+                    pending_commands[run_id] = tool_input.get("command", "")
 
             elif kind == "on_tool_end":
                 step = active_steps.get(run_id)
@@ -114,7 +118,7 @@ async def main(message: cl.Message):
                 tool_name = event["name"]
                 
                 if step:
-                    str_output = str(tool_output)
+                    str_output = extract_tool_result(tool_output)
                     if len(str_output) > 500:
                         str_output = str_output[:500] + "..."
                     step.output = str_output
@@ -124,7 +128,7 @@ async def main(message: cl.Message):
                 # Render diffs for edit_file / write_file using captured input
                 if tool_name in ("edit_file", "write_file") and run_id in pending_edits:
                     edit_info = pending_edits.pop(run_id)
-                    result_msg = str(tool_output) if tool_output else ""
+                    result_msg = extract_tool_result(tool_output)
                     
                     # If the tool returned an error, don't show the diff viewer
                     if result_msg.startswith("Error"):
@@ -158,6 +162,25 @@ async def main(message: cl.Message):
                         except Exception as e:
                             logger.warning(f"DiffViewer render failed: {e}")
 
+                # Render terminal output for execute tool
+                if tool_name == "execute" and run_id in pending_commands:
+                    cmd = pending_commands.pop(run_id)
+                    output_str = extract_tool_result(tool_output)
+                    if not output_str.startswith("Error: Execution not available"):
+                        try:
+                            exit_code = parse_exit_code(output_str)
+                            term_el = cl.CustomElement(
+                                name="TerminalOutput",
+                                props={
+                                    "command": cmd,
+                                    "output": output_str,
+                                    "exit_code": exit_code,
+                                },
+                                display="inline",
+                            )
+                            await term_el.send(for_id=stream_msg.id)
+                        except Exception as e:
+                            logger.warning(f"TerminalOutput render failed: {e}")
 
                 # Real-time todos
                 if tool_name == "write_todos" and tool_output:
@@ -247,5 +270,39 @@ async def update_task_list(todos):
         await task_list.send()
     except Exception:
         pass
+
+def parse_exit_code(output_str):
+    """
+    Extracts the exit code from the tool output string.
+    The deepagents LocalShellBackend appends 'Exit code: N' at the end.
+    """
+    import re
+    if not output_str:
+        return None
+        
+    # Look for 'Exit code: N' or '[Command ... with exit code N]'
+    match = re.search(r"exit code (\d+)", output_str, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+        
+    # If output contains succeeded but no code, assume 0
+    if "Command succeeded" in output_str:
+        return 0
+        
+    return 0 if "Successfully" in output_str else None
+
+def extract_tool_result(tool_output):
+    """Extract string content from various tool output types."""
+    if tool_output is None:
+        return ""
+    if isinstance(tool_output, str):
+        return tool_output
+    # Handle ToolMessage from deepagents
+    if hasattr(tool_output, "content"):
+        return str(tool_output.content)
+    # Handle dictionary representation
+    if isinstance(tool_output, dict):
+        return tool_output.get("content", str(tool_output))
+    return str(tool_output)
 
 # To run: chainlit run assistant_ui.py

@@ -1,7 +1,7 @@
 import os
 from llm_factory import get_llm
 from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
+from deepagents.backends import LocalShellBackend
 from langgraph.checkpoint.memory import MemorySaver
 
 # Single shared checkpointer instance for in-memory persistence
@@ -26,7 +26,9 @@ def create_coding_assistant(workspace_path: str):
     if not os.path.exists(persistence_path):
         os.makedirs(persistence_path)
     
-    backend = FilesystemBackend(root_dir="..", virtual_mode=True)
+    # Use absolute path for root_dir to avoid Windows issues with subprocess
+    parent_dir = os.path.abspath(os.path.join(workspace_path, ".."))
+    backend = LocalShellBackend(root_dir=parent_dir, virtual_mode=True, inherit_env=True)
 
     # 3. Define the detailed system prompt for a coding assistant
     # We clarify the directory structure for the agent
@@ -45,6 +47,10 @@ Filesystem & Paths:
 - NEVER use Windows absolute paths (e.g., 'C:\\Users\\...') as they are not supported.
 - Use 'grep' for efficient keyword searches across the project to find specific file and line numbers quickly.
 - You can execute shell commands via the 'execute' tool.
+- CRITICAL (Windows Path Handling): Your terminal 'cwd' is the virtual root '/'. 
+  * NEVER use a leading slash in shell commands (e.g., NEVER do 'pip install -r /repo/reqs.txt').
+  * ALWAYS use relative paths without a leading slash (e.g., DO 'pip install -r {repo_folder}/requirements.txt').
+  * On Windows, a leading slash '/' refers to the drive root (C:\), NOT your project root.
 - You should use 'write_todos' to PLAN your work before making any changes.
 - You can spawn sub-agents for specialized tasks like writing documentation or specific unit tests.
 
