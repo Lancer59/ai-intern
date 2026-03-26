@@ -85,9 +85,23 @@ async def main(message: cl.Message):
 
             # Tool steps
             elif kind == "on_tool_start":
-                logger.info(f"Tool Start: {event['name']}")
-                step = cl.Step(name=f"Tool: {event['name']}", type="tool", parent_id=stream_msg.id)
+                # Custom display names for tools
+                tool_name = event["name"]
                 tool_input = event["data"].get("input")
+                display_map = {
+                    "write_file": "Creating...",
+                    "read_file": "Analyzing...",
+                    "view_file": "Analyzing...",
+                    "edit_file": "Editing...",
+                    "execute": "Executing...",
+                    "ls": "Listing...",
+                    "grep_search": "Searching...",
+                    # "find_by_name": "Searching...",
+                    "write_todos": "Updating todos...",
+                }
+                display_name = f"{display_map.get(tool_name, f'Tool: {tool_name}')} {tool_input or ''}"
+                
+                step = cl.Step(name=display_name, type="tool", parent_id=stream_msg.id)
                 step.input = str(tool_input) if tool_input else ""
                 await step.send()
                 active_steps[run_id] = step
