@@ -53,6 +53,7 @@ Rules:
 2. Be concise and professional.
 3. Before executing potentially destructive shell commands (like deleting files or installing global packages), explain what you are doing.
 4. If you make changes, verify them (e.g., by running tests if possible).
+5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists — it will error. Use 'write_file' only for creating brand new files.
 """
 
     # 4. Initialize the DeepAgent

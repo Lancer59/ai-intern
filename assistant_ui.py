@@ -61,6 +61,7 @@ async def main(message: cl.Message):
     full_content = ""
     active_steps = {}
     all_steps = []
+    pending_edits = {}  # Capture edit_file inputs for diff rendering
 
     try:
         # 2. Run the agent with astream_events
@@ -70,7 +71,7 @@ async def main(message: cl.Message):
         async for event in agent.astream_events(input_data, version="v2", config=config):
             kind = event["event"]
             run_id = event["run_id"]
-            logger.debug(f"Event: {kind} | RunID: {run_id}")
+            logger.info(f"Event: {kind} | name={event.get('name', '?')}")
 
             # Stream tokens
             if kind == "on_chat_model_stream":
@@ -90,10 +91,28 @@ async def main(message: cl.Message):
                 await step.send()
                 active_steps[run_id] = step
                 all_steps.append(step)
+                
+                # Capture edit_file inputs for diff rendering
+                if event["name"] == "edit_file" and isinstance(tool_input, dict):
+                    pending_edits[run_id] = {
+                        "type": "edit",
+                        "file_path": tool_input.get("file_path", ""),
+                        "old_string": tool_input.get("old_string", ""),
+                        "new_string": tool_input.get("new_string", ""),
+                    }
+                # Capture write_file inputs for new-file rendering
+                elif event["name"] == "write_file" and isinstance(tool_input, dict):
+                    pending_edits[run_id] = {
+                        "type": "write",
+                        "file_path": tool_input.get("file_path", ""),
+                        "content": tool_input.get("content", ""),
+                    }
 
             elif kind == "on_tool_end":
                 step = active_steps.get(run_id)
                 tool_output = event["data"].get("output")
+                tool_name = event["name"]
+                
                 if step:
                     str_output = str(tool_output)
                     if len(str_output) > 500:
@@ -102,18 +121,59 @@ async def main(message: cl.Message):
                     await step.update()
                     del active_steps[run_id]
 
+                # Render diffs for edit_file / write_file using captured input
+                if tool_name in ("edit_file", "write_file") and run_id in pending_edits:
+                    edit_info = pending_edits.pop(run_id)
+                    result_msg = str(tool_output) if tool_output else ""
+                    
+                    # If the tool returned an error, don't show the diff viewer
+                    if result_msg.startswith("Error"):
+                        logger.warning(f"{tool_name} error: {result_msg}")
+                    else:
+                        try:
+                            if edit_info["type"] == "write":
+                                # New file: empty old_str, full content as new_str (all green)
+                                diff_props = {
+                                    "filename": edit_info["file_path"],
+                                    "old_str": "",
+                                    "new_str": edit_info["content"],
+                                    "result_msg": f"✨ New file created",
+                                    "is_new_file": True,
+                                }
+                            else:
+                                # Edit: show old_str → new_str diff
+                                diff_props = {
+                                    "filename": edit_info["file_path"],
+                                    "old_str": edit_info["old_string"],
+                                    "new_str": edit_info["new_string"],
+                                    "result_msg": result_msg,
+                                    "is_new_file": False,
+                                }
+                            diff_el = cl.CustomElement(
+                                name="DiffViewer",
+                                props=diff_props,
+                                display="inline",
+                            )
+                            await diff_el.send(for_id=stream_msg.id)
+                        except Exception as e:
+                            logger.warning(f"DiffViewer render failed: {e}")
+
+
                 # Real-time todos
-                if event["name"] == "write_todos" and tool_output:
-                    todos = None
-                    if hasattr(tool_output, "update") and isinstance(tool_output.update, dict) and "todos" in tool_output.update:
-                        todos = tool_output.update["todos"]
-                    elif isinstance(tool_output, dict) and "todos" in tool_output:
-                        todos = tool_output["todos"]
-                    if todos:
-                        await update_task_list(todos)
+                if tool_name == "write_todos" and tool_output:
+                    try:
+                        todos = None
+                        if hasattr(tool_output, "update") and isinstance(tool_output.update, dict) and "todos" in tool_output.update:
+                            todos = tool_output.update["todos"]
+                        elif isinstance(tool_output, dict) and "todos" in tool_output:
+                            todos = tool_output["todos"]
+                        if todos:
+                            await update_task_list(todos)
+                    except Exception as e:
+                        logger.warning(f"Todo update failed: {e}")
 
             elif kind == "on_tool_error":
-                error_msg = event["data"].get("error", "Unknown tool error")
+                error_msg = str(event["data"].get("error", "Unknown tool error"))
                 logger.error(f"Tool Error ({event.get('name')}): {error_msg}")
                 step = active_steps.get(run_id)
                 if step:
@@ -121,13 +181,12 @@ async def main(message: cl.Message):
                     await step.update()
 
             elif kind == "on_chain_error":
-                error_msg = event["data"].get("error", "Unknown chain error")
+                error_msg = str(event["data"].get("error", "Unknown chain error"))
                 logger.error(f"Chain Error: {error_msg}")
                 await cl.Message(content=f"🚨 Backend Error: {error_msg}").send()
 
             # Final response fallback
             elif kind == "on_chain_end":
-                logger.info("Chain Ended")
                 try:
                     output = event["data"].get("output")
                     if output and isinstance(output, dict):
@@ -148,8 +207,16 @@ async def main(message: cl.Message):
                 except Exception:
                     pass
 
+    except Exception as e:
+        # Catch-all: show the error in UI so user sees it
+        error_text = f"🚨 Error: {type(e).__name__}: {e}"
+        logger.error(error_text, exc_info=True)
+        stream_msg.content = error_text
+        await stream_msg.update()
+        return
+
     finally:
-        # 3. Final UI cleanup
+        # Final UI cleanup
         if full_content:
             stream_msg.content = full_content
             await stream_msg.update()
@@ -157,12 +224,12 @@ async def main(message: cl.Message):
             stream_msg.content = "No text summary provided."
             await stream_msg.update()
             
-        # Completely remove all tool steps from the UI once the AI finishes responding
+        # Remove tool steps from the UI
         for step in all_steps:
             try:
                 await step.remove()
-            except Exception as e:
-                logger.debug(f"Failed to remove step {step.name}: {e}")
+            except Exception:
+                pass
 
 async def update_task_list(todos):
     """Helper to refresh the sidebar TaskList"""
