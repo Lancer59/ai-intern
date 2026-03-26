@@ -4,11 +4,12 @@ from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 from langgraph.checkpoint.memory import MemorySaver
 
+from mcp_client import get_mcp_tools
 # Single shared checkpointer instance for in-memory persistence
 memory_saver = MemorySaver()
 
 
-def create_coding_assistant(workspace_path: str):
+async def create_coding_assistant(workspace_path: str):
     """
     Creates a DeepAgent configured as an AI coding assistant for a specific workspace.
     """
@@ -61,7 +62,11 @@ Rules:
 4. If you make changes, verify them (e.g., by running tests if possible).
 5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists — it will error. Use 'write_file' only for creating brand new files.
 """
-
+    #Fetch mcp tools
+    mcp_tools = await get_mcp_tools()
+    print("MCP tools in ussage: ")
+    for t in mcp_tools:
+        print(t.name)
     # 4. Initialize the DeepAgent
     # The deepagents library automatically injects filesystem and planning tools when a backend is provided.
     agent = create_deep_agent(
@@ -69,7 +74,7 @@ Rules:
         system_prompt=system_prompt,
         backend=backend,
         checkpointer=memory_saver,
-        # tools=[], # Add custom tools here if needed
+        tools=mcp_tools, # Add custom tools here if needed
     )
 
     return agent

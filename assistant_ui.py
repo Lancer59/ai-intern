@@ -26,9 +26,10 @@ async def start():
         cl.user_session.set("workspace", workspace)
         
         try:
-            # Create the agent using our helper
-            agent = create_coding_assistant(workspace)
+            # Create the agent using our helper (now async to load MCP tools)
+            agent = await create_coding_assistant(workspace)
             cl.user_session.set("agent", agent)
+
             
             # Generate a unique thread_id for this session's memory
             thread_id = str(uuid.uuid4())

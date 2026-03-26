@@ -121,9 +121,9 @@ memory_saver = SqliteSaver("agent_memory.db")
 - [ ] Multi-file diff viewer in the UI
 - [ ] Docker-based sandboxed execution
 - [ ] Project-level `AGENTS.md` for persistent context
-- [ ] MCP client for the coding agent. 
 - [ ] Agent skills which can be added dynamically.
 - [ ] Set iteration limit dynamically for each query.
+- [ ] git tools to be added so the coding agent can push the code too.
 ---
 
 ## License

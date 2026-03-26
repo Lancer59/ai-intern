@@ -4,3 +4,4 @@ langchain-ollama
 python-dotenv
 deepagents
 chainlit
+langchain-mcp-adapters
