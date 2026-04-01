@@ -57,6 +57,9 @@ cp .env.example .env
 ### 3. Run the Web UI
 
 ```bash
+# First time only — create the Chainlit SQLite schema
+python init_db.py
+
 chainlit run assistant_ui.py
 ```
 
@@ -95,14 +98,12 @@ llm = get_llm(provider="ollama")     # Local Ollama
 
 ### Persistent Memory (Production)
 
-To persist memory across server restarts, swap `MemorySaver` for `SqliteSaver` in `coding_assistant.py`:
+Conversation history and agent state are persisted to SQLite automatically:
+- `agent_data/chainlit_ui.db` — Chainlit UI threads, messages, history sidebar
+- `agent_data/checkpoints_lg.db` — LangGraph agent state (tool calls, messages per thread)
+- `/memories/` — Cross-session long-term memory via deepagents `StoreBackend` (agent writes here to remember things across conversations)
 
-```python
-# from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-memory_saver = SqliteSaver("agent_memory.db")
-```
+To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncSqliteSaver` for their Postgres equivalents.
 
 ---
 
@@ -116,18 +117,26 @@ memory_saver = SqliteSaver("agent_memory.db")
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | For Azure | Model deployment name |
 | `OPENAI_API_KEY` | For OpenAI | OpenAI API key |
 | `GOOGLE_API_KEY` | For Google | Google Gemini API key |
+| `TAVILY_API_KEY` | For MCP | Tavily web search API key |
+| `CHAINLIT_AUTH_SECRET` | Yes | Secret for Chainlit cookie auth |
+| `CHAINLIT_USER` | Yes | Login username |
+| `CHAINLIT_PASSWORD` | Yes | Login password |
 
 ---
 
 ## ToDO
 
-- [ ] Persistent memory with SQLite/Postgres for production
-- [ ] Custom tools extension (Started: implemented `think` & MCP integration)
 - [ ] Docker-based sandboxed execution
 - [ ] Project-level `AGENTS.md` for persistent context
-- [ ] Agent skills which can be added dynamically.
-- [ ] Set iteration limit dynamically for each query.
-- [ ] git tools to be added so the coding agent can push the code too.
+- [ ] Agent skills which can be added dynamically
+- [ ] Set iteration limit dynamically for each query
+- [ ] git tools so the coding agent can push code
+- [ ] Swap SQLite for PostgreSQL for multi-user production deployments
+- [ ] checkpointer in conversation 
+- [ ] No git tooling, no .ai-intern-rules project context file, no semantic repo map
+- [ ] See content from python files of packages within the code base
+- [ ] Trust command (user based auth)
+- [ ] Unable to replace text trying different approach
 ---
 
 ## License

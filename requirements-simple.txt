@@ -5,3 +5,6 @@ python-dotenv
 deepagents
 chainlit
 langchain-mcp-adapters
+langgraph-checkpoint-sqlite
+aiosqlite
+SQLAlchemy

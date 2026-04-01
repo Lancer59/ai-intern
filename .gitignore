@@ -42,7 +42,6 @@ deepagents_data
 .DS_Store
 Thumbs.db
 
-# Chainlit
-.chainlit/
-.files/
-chainlit.md
+# Chainlit config/translations should be tracked
+!.chainlit/config.toml
+!.chainlit/translations/
