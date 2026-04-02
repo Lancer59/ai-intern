@@ -13,11 +13,14 @@ from langgraph.store.memory import InMemoryStore
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from coding_assistant import create_coding_assistant
 from langgraph.types import Command
+from dashboard_db import init_db, get_config, record_llm_call, record_tool_invocation_start, record_tool_invocation_end, record_loc_event
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AssistantUI")
+
+_db_initialized = False
 
 # --- Persistence ---
 @cl.data_layer
@@ -41,20 +44,29 @@ async def auth_callback(username: str, password: str):
 
 # --- LangGraph checkpointer (shared, persistent) ---
 _checkpointer = None
+_checkpointer_conn = None  # kept so lifespan in app.py can close it on shutdown
 _store = InMemoryStore()
 
 async def get_checkpointer():
-    global _checkpointer
+    global _checkpointer, _checkpointer_conn
     if _checkpointer is None:
         import aiosqlite
-        conn = await aiosqlite.connect("agent_data/checkpoints_lg.db")
-        _checkpointer = AsyncSqliteSaver(conn)
+        _checkpointer_conn = await aiosqlite.connect("agent_data/checkpoints_lg.db")
+        _checkpointer = AsyncSqliteSaver(_checkpointer_conn)
         await _checkpointer.setup()
     return _checkpointer
 
 
 @cl.on_chat_start
 async def start():
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            await init_db()
+            _db_initialized = True
+        except Exception as e:
+            logger.warning(f"init_db failed: {e}")
+
     res = await cl.AskUserMessage(content="Enter the project folder name (sibling to ai-intern):").send()
     if not res:
         return
@@ -74,7 +86,18 @@ async def start():
 
         checkpointer = await get_checkpointer()
         user_id = cl.user_session.get("user").identifier if cl.user_session.get("user") else "default"
-        agent = await create_coding_assistant(workspace, checkpointer, _store, user_id=user_id)
+        try:
+            agent_config = await get_config()
+        except Exception as e:
+            logger.warning(f"get_config failed, using defaults: {e}")
+            agent_config = {}
+        agent = await create_coding_assistant(
+            workspace, checkpointer, _store, user_id=user_id,
+            system_prompt=agent_config.get("system_prompt"),
+            iteration_limit=agent_config.get("iteration_limit"),
+            enabled_tools=agent_config.get("enabled_tools"),
+            approval_tools=agent_config.get("approval_tools"),
+        )
         thread_id = str(uuid.uuid4())
 
         cl.user_session.set("agent", agent)
@@ -100,6 +123,14 @@ async def start():
 
 @cl.on_chat_resume
 async def on_chat_resume(thread):
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            await init_db()
+            _db_initialized = True
+        except Exception as e:
+            logger.warning(f"init_db failed: {e}")
+
     import json
     raw_metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
     if isinstance(raw_metadata, str):
@@ -120,7 +151,18 @@ async def on_chat_resume(thread):
     try:
         checkpointer = await get_checkpointer()
         user_id = cl.user_session.get("user").identifier if cl.user_session.get("user") else "default"
-        agent = await create_coding_assistant(workspace, checkpointer, _store, user_id=user_id)
+        try:
+            agent_config = await get_config()
+        except Exception as e:
+            logger.warning(f"get_config failed, using defaults: {e}")
+            agent_config = {}
+        agent = await create_coding_assistant(
+            workspace, checkpointer, _store, user_id=user_id,
+            system_prompt=agent_config.get("system_prompt"),
+            iteration_limit=agent_config.get("iteration_limit"),
+            enabled_tools=agent_config.get("enabled_tools"),
+            approval_tools=agent_config.get("approval_tools"),
+        )
 
         cl.user_session.set("agent", agent)
         cl.user_session.set("thread_id", thread_id)
@@ -157,13 +199,15 @@ async def main(message: cl.Message):
 
     full_content = ""
     active_steps = {}
+    tool_invocation_ids = {}   # run_id -> invocation_id
+    tool_start_times = {}      # run_id -> start time (monotonic seconds)
     all_steps = []
     pending_edits = {}
     pending_commands = {}
 
     try:
         input_data = {"messages": [("user", content)]}
-        config = {"recursion_limit": 200, "configurable": {"thread_id": thread_id}}
+        config = {"recursion_limit": getattr(agent, '_iteration_limit', 200), "configurable": {"thread_id": thread_id}}
 
         while True:
             async for event in agent.astream_events(input_data, version="v2", config=config):
@@ -193,6 +237,13 @@ async def main(message: cl.Message):
                     active_steps[run_id] = step
                     all_steps.append(step)
 
+                    try:
+                        invocation_id = await record_tool_invocation_start(thread_id, tool_name)
+                        tool_invocation_ids[run_id] = invocation_id
+                        tool_start_times[run_id] = asyncio.get_event_loop().time()
+                    except Exception as e:
+                        logger.warning(f"record_tool_invocation_start failed: {e}")
+
                     if tool_name == "edit_file" and isinstance(tool_input, dict):
                         pending_edits[run_id] = {"type": "edit", "file_path": tool_input.get("file_path", ""),
                                                   "old_string": tool_input.get("old_string", ""), "new_string": tool_input.get("new_string", "")}
@@ -211,6 +262,17 @@ async def main(message: cl.Message):
                         step.output = str_output[:500] + "..." if len(str_output) > 500 else str_output
                         await step.update()
 
+                    try:
+                        str_output_for_telemetry = extract_tool_result(tool_output)
+                        invocation_id = tool_invocation_ids.pop(run_id, None)
+                        start_time = tool_start_times.pop(run_id, None)
+                        if invocation_id is not None:
+                            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000 if start_time is not None else 0.0
+                            status = "failure" if str_output_for_telemetry.startswith("Error") else "success"
+                            await record_tool_invocation_end(invocation_id, duration_ms, status)
+                    except Exception as e:
+                        logger.warning(f"record_tool_invocation_end failed: {e}")
+
                     if tool_name in ("edit_file", "write_file") and run_id in pending_edits:
                         edit_info = pending_edits.pop(run_id)
                         result_msg = extract_tool_result(tool_output)
@@ -224,6 +286,17 @@ async def main(message: cl.Message):
                                 await cl.CustomElement(name="DiffViewer", props=diff_props, display="inline").send(for_id=stream_msg.id)
                             except Exception as e:
                                 logger.warning(f"DiffViewer render failed: {e}")
+
+                            try:
+                                if edit_info["type"] == "write":
+                                    line_count = len(edit_info["content"].splitlines())
+                                    await record_loc_event(thread_id, line_count)
+                                elif edit_info["type"] == "edit":
+                                    delta = len(edit_info["new_string"].splitlines()) - len(edit_info["old_string"].splitlines())
+                                    if delta != 0:
+                                        await record_loc_event(thread_id, delta)
+                            except Exception as e:
+                                logger.warning(f"record_loc_event failed: {e}")
 
                     if tool_name == "execute" and run_id in pending_commands:
                         cmd = pending_commands.pop(run_id)
@@ -256,6 +329,23 @@ async def main(message: cl.Message):
                 elif kind == "on_chain_error":
                     logger.error(f"Chain Error: {event['data'].get('error')}")
                     await cl.Message(content=f"🚨 Backend Error: {event['data'].get('error')}").send()
+
+                elif kind == "on_chat_model_end":
+                    try:
+                        output = event["data"].get("output")
+                        usage = getattr(output, "usage_metadata", None) or getattr(output, "response_metadata", {}).get("token_usage", {})
+                        if isinstance(usage, dict):
+                            prompt_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+                            completion_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+                            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+                        else:
+                            prompt_tokens = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0)
+                            completion_tokens = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0)
+                            total_tokens = getattr(usage, "total_tokens", prompt_tokens + completion_tokens)
+                        model = getattr(output, "response_metadata", {}).get("model_name", "unknown") if output else "unknown"
+                        await record_llm_call(thread_id, model, prompt_tokens, completion_tokens, total_tokens)
+                    except Exception as e:
+                        logger.warning(f"record_llm_call failed: {e}")
 
                 elif kind == "on_chain_end":
                     try:

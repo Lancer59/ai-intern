@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3250;
+    --accent: #6c63ff;
+    --accent2: #4ecdc4;
+    --text: #e2e8f0;
+    --text-muted: #8892a4;
+    --success: #48bb78;
+    --error: #fc8181;
+    --warning: #f6c90e;
+    --gold: #b8860b;
+    --gold-bg: #2a2200;
+    --radius: 10px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* NAV */
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; gap: 2rem; height: 56px; width: 100%; }
+  nav .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: 0.5px; white-space: nowrap; }
+  nav .tab { padding: 0 1rem; height: 56px; display: flex; align-items: center; cursor: pointer; color: var(--text-muted); border-bottom: 3px solid transparent; font-size: 0.95rem; transition: color 0.2s, border-color 0.2s; user-select: none; white-space: nowrap; }
+  nav .tab:hover { color: var(--text); }
+  nav .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  nav .nav-spacer { flex: 1; }
+  nav .btn-chat { margin-left: auto; white-space: nowrap; }
+
+  /* PAGES */
+  .page { display: none; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* CARDS */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; box-shadow: var(--shadow); }
+  .card-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .card-value { font-size: 2rem; font-weight: 700; color: var(--text); }
+
+  /* SUMMARY ROW */
+  .summary-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+
+  /* DATE FILTER */
+  .filter-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+  .filter-bar label { color: var(--text-muted); font-size: 0.9rem; }
+  .filter-bar input[type=date] { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.9rem; }
+  .filter-bar input[type=date]:focus { outline: none; border-color: var(--accent); }
+
+  /* BUTTONS */
+  .btn { padding: 0.45rem 1.1rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: opacity 0.2s; }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-danger { background: #c0392b; color: #fff; }
+  .btn-sm { padding: 0.3rem 0.75rem; font-size: 0.82rem; }
+
+  /* CHARTS GRID */
+  .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+  .chart-card h3 { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1rem; }
+  .chart-card canvas { max-height: 260px; }
+
+  /* TABLES */
+  .table-section { margin-bottom: 2rem; }
+  .table-section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  thead th { background: var(--surface2); color: var(--text-muted); text-align: left; padding: 0.75rem 1rem; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody td { padding: 0.7rem 1rem; color: var(--text); }
+  .top-row { background: var(--gold-bg) !important; }
+  .top-row td { color: var(--warning); }
+
+  /* SESSION ROWS */
+  .session-row { cursor: pointer; }
+  .session-row:hover { background: var(--surface2); }
+
+  /* SESSION DETAIL */
+  #session-detail { display: none; }
+  #session-detail.visible { display: block; }
+  .session-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+  .session-header h2 { font-size: 1rem; font-weight: 600; }
+  .session-stats { display: flex; gap: 2rem; margin-bottom: 1.5rem; }
+  .session-stat { background: var(--surface2); border-radius: 8px; padding: 0.75rem 1.25rem; }
+  .session-stat .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .session-stat .val { font-size: 1.4rem; font-weight: 700; }
+
+  /* SETTINGS */
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  @media (max-width: 800px) { .settings-grid { grid-template-columns: 1fr; } }
+  .form-group { margin-bottom: 1.25rem; }
+  .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+  .form-group input[type=number], .form-group textarea, .form-group input[type=text] {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.9rem; font-family: inherit;
+  }
+  .form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
+  .form-group input[readonly] { opacity: 0.6; cursor: not-allowed; }
+  .form-group textarea { resize: vertical; min-height: 180px; }
+  .field-error { color: var(--error); font-size: 0.8rem; margin-top: 0.3rem; display: none; }
+  .field-error.visible { display: block; }
+
+  /* TOOLS LIST */
+  .tools-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+  .tool-item { display: flex; align-items: center; gap: 1.5rem; background: var(--surface2); border-radius: 6px; padding: 0.5rem 0.75rem; }
+  .tool-item .tool-name { flex: 1; font-size: 0.88rem; font-family: monospace; color: var(--text); }
+  .tool-item label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+  .tool-item input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  /* TOAST */
+  #toast { position: fixed; bottom: 2rem; right: 2rem; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: 600; z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #toast.success { background: var(--success); color: #fff; }
+  #toast.error { background: var(--error); color: #fff; }
+
+  /* LOADING */
+  .loading { color: var(--text-muted); font-size: 0.9rem; padding: 1rem 0; }
+  .error-msg { color: var(--error); font-size: 0.9rem; padding: 0.5rem 0; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">⚡ Agent Dashboard</span>
+  <span class="tab active" data-tab="observability">Observability</span>
+  <span class="tab" data-tab="settings">Settings</span>
+  <span class="nav-spacer"></span>
+  <a href="/" class="btn btn-secondary btn-sm btn-chat">← Back to Chat</a>
+</nav>
+
+<!-- OBSERVABILITY PAGE -->
+<div id="page-observability" class="page active">
+  <div class="filter-bar">
+    <label>From <input type="date" id="date-from" /></label>
+    <label>To <input type="date" id="date-to" /></label>
+    <button class="btn btn-primary" id="btn-apply">Apply</button>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="summary-row">
+    <div class="card"><div class="card-title">Total LLM Calls</div><div class="card-value" id="s-calls">—</div></div>
+    <div class="card"><div class="card-title">Total Tokens</div><div class="card-value" id="s-total">—</div></div>
+    <div class="card"><div class="card-title">Prompt Tokens</div><div class="card-value" id="s-prompt">—</div></div>
+    <div class="card"><div class="card-title">Completion Tokens</div><div class="card-value" id="s-completion">—</div></div>
+    <div class="card"><div class="card-title">Lines of Code Written</div><div class="card-value" id="s-loc">—</div></div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+    <div class="chart-card"><h3>Tokens Over Time</h3><canvas id="chart-tokens"></canvas></div>
+    <div class="chart-card"><h3>LLM Calls Per Day</h3><canvas id="chart-calls"></canvas></div>
+    <div class="chart-card"><h3>Tool Invocations (Top 10)</h3><canvas id="chart-tools"></canvas></div>
+    <div class="chart-card"><h3>Lines of Code Per Day</h3><canvas id="chart-loc"></canvas></div>
+  </div>
+
+  <!-- Per-model breakdown -->
+  <div class="table-section">
+    <h2>Per-Model Breakdown</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Model</th><th>Calls</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th></tr></thead>
+        <tbody id="tbl-models"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tool usage -->
+  <div class="table-section">
+    <h2>Tool Usage</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Invocations</th><th>Avg Duration (ms)</th><th>Failure Rate (%)</th></tr></thead>
+        <tbody id="tbl-tools"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="table-section" id="sessions-section">
+    <h2>Sessions</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Thread ID</th><th>Last Active</th></tr></thead>
+        <tbody id="tbl-sessions"><tr><td colspan="2" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Session Detail -->
+  <div id="session-detail">
+    <div class="session-header">
+      <button class="btn btn-secondary btn-sm" id="btn-back">← Back</button>
+      <h2 id="session-title">Session Detail</h2>
+    </div>
+    <div class="session-stats">
+      <div class="session-stat"><div class="label">Total Tokens</div><div class="val" id="sd-tokens">—</div></div>
+      <div class="session-stat"><div class="label">Lines of Code</div><div class="val" id="sd-loc">—</div></div>
+    </div>
+    <div class="table-section">
+      <h2>LLM Calls</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Timestamp</th><th>Model</th><th>Prompt</th><th>Completion</th><th>Total Tokens</th></tr></thead>
+          <tbody id="tbl-sd-llm"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="table-section">
+      <h2>Tool Invocations</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Timestamp</th><th>Tool</th><th>Duration (ms)</th><th>Status</th></tr></thead>
+          <tbody id="tbl-sd-tools"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS PAGE -->
+<div id="page-settings" class="page">
+  <div class="settings-grid">
+    <div>
+      <div class="card" style="margin-bottom:1.5rem">
+        <h2 style="font-size:1rem;margin-bottom:1.25rem;color:var(--text-muted)">Provider Info</h2>
+        <div class="form-group">
+          <label>LLM Provider</label>
+          <input type="text" id="cfg-provider" readonly />
+        </div>
+        <div class="form-group">
+          <label>Model Name</label>
+          <input type="text" id="cfg-model" readonly />
+        </div>
+        <div class="form-group">
+          <label>Iteration Limit</label>
+          <input type="number" id="cfg-iter" min="1" max="500" />
+          <div class="field-error" id="err-iter">Must be between 1 and 500.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+          <h2 style="font-size:1rem;color:var(--text-muted)">System Prompt</h2>
+          <button class="btn btn-secondary btn-sm" id="btn-reset-prompt">Reset to Default</button>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <textarea id="cfg-prompt" rows="10"></textarea>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2 style="font-size:1rem;margin-bottom:1rem;color:var(--text-muted)">Tools</h2>
+        <div id="tools-loading" class="loading">Loading...</div>
+        <div class="tools-list" id="tools-list"></div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:1.5rem;display:flex;gap:1rem">
+    <button class="btn btn-primary" id="btn-save">Save Settings</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── Utilities ───────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString();
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  return new Date(s).toLocaleString();
+}
+function truncate(s, n = 20) {
+  if (!s) return '—';
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+let toastTimer;
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+}
+
+async function apiFetch(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.statusText);
+    throw new Error(txt || res.statusText);
+  }
+  return res.json();
+}
+
+// ─── Tab Navigation ──────────────────────────────────────────────────────────
+document.querySelectorAll('nav .tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('nav .tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'settings') loadSettings();
+  });
+});
+
+// ─── Date defaults ───────────────────────────────────────────────────────────
+(function initDates() {
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(from.getDate() - 30);
+  document.getElementById('date-to').value = today.toISOString().slice(0, 10);
+  document.getElementById('date-from').value = from.toISOString().slice(0, 10);
+})();
+
+// ─── Chart instances ─────────────────────────────────────────────────────────
+const charts = {};
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+const CHART_DEFAULTS = {
+  plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } } },
+  scales: {
+    x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#2e3250' } },
+    y: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#2e3250' } }
+  }
+};
+
+function makeChart(id, type, data, options = {}) {
+  destroyChart(id);
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type,
+    data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      ...CHART_DEFAULTS,
+      ...options,
+      plugins: { ...CHART_DEFAULTS.plugins, ...(options.plugins || {}) },
+      scales: { ...CHART_DEFAULTS.scales, ...(options.scales || {}) }
+    }
+  });
+}
+
+// ─── Observability ───────────────────────────────────────────────────────────
+function getDateRange() {
+  return {
+    start: document.getElementById('date-from').value,
+    end: document.getElementById('date-to').value
+  };
+}
+
+async function loadSummary() {
+  const { start, end } = getDateRange();
+  try {
+    const d = await apiFetch(`/dashboard/api/telemetry/summary?start=${start}&end=${end}`);
+    document.getElementById('s-calls').textContent = fmt(d.llm_call_count);
+    document.getElementById('s-total').textContent = fmt(d.total_tokens);
+    document.getElementById('s-prompt').textContent = fmt(d.prompt_tokens);
+    document.getElementById('s-completion').textContent = fmt(d.completion_tokens);
+    document.getElementById('s-loc').textContent = fmt(d.total_loc);
+  } catch (e) {
+    ['s-calls','s-total','s-prompt','s-completion','s-loc'].forEach(id => {
+      document.getElementById(id).textContent = 'Error';
+    });
+  }
+}
+
+async function loadTokensChart() {
+  const { start, end } = getDateRange();
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/tokens-over-time?start=${start}&end=${end}`);
+    const labels = rows.map(r => r.date);
+    makeChart('chart-tokens', 'line', {
+      labels,
+      datasets: [
+        { label: 'Prompt Tokens', data: rows.map(r => r.prompt_tokens), borderColor: '#6c63ff', backgroundColor: 'rgba(108,99,255,0.15)', tension: 0.3, fill: true, pointRadius: 3 },
+        { label: 'Completion Tokens', data: rows.map(r => r.completion_tokens), borderColor: '#4ecdc4', backgroundColor: 'rgba(78,205,196,0.1)', tension: 0.3, fill: true, pointRadius: 3 }
+      ]
+    });
+  } catch (e) { destroyChart('chart-tokens'); }
+}
+
+async function loadCallsChart() {
+  const { start, end } = getDateRange();
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/tokens-over-time?start=${start}&end=${end}`);
+    makeChart('chart-calls', 'bar', {
+      labels: rows.map(r => r.date),
+      datasets: [{ label: 'LLM Calls', data: rows.map(r => r.call_count), backgroundColor: 'rgba(108,99,255,0.7)', borderColor: '#6c63ff', borderWidth: 1 }]
+    });
+  } catch (e) { destroyChart('chart-calls'); }
+}
+
+async function loadToolsChart() {
+  const { start, end } = getDateRange();
+  try {
+    const rows = (await apiFetch(`/dashboard/api/telemetry/tools?start=${start}&end=${end}`)).slice(0, 10);
+    makeChart('chart-tools', 'bar', {
+      labels: rows.map(r => r.tool_name),
+      datasets: [{ label: 'Invocations', data: rows.map(r => r.invocation_count), backgroundColor: 'rgba(78,205,196,0.7)', borderColor: '#4ecdc4', borderWidth: 1 }]
+    }, {
+      indexAxis: 'y',
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#2e3250' } },
+        y: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#2e3250' } }
+      }
+    });
+  } catch (e) { destroyChart('chart-tools'); }
+}
+
+async function loadLocChart() {
+  const { start, end } = getDateRange();
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/loc-over-time?start=${start}&end=${end}`);
+    makeChart('chart-loc', 'line', {
+      labels: rows.map(r => r.date),
+      datasets: [{ label: 'Lines of Code', data: rows.map(r => r.line_count), borderColor: '#f6c90e', backgroundColor: 'rgba(246,201,14,0.1)', tension: 0.3, fill: true, pointRadius: 3 }]
+    });
+  } catch (e) { destroyChart('chart-loc'); }
+}
+
+async function loadModelsTable() {
+  const { start, end } = getDateRange();
+  const tbody = document.getElementById('tbl-models');
+  tbody.innerHTML = '<tr><td colspan="5" class="loading">Loading...</td></tr>';
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/models?start=${start}&end=${end}`);
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);padding:1rem">No data</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td>${r.model || '—'}</td><td>${fmt(r.call_count)}</td>
+      <td>${fmt(r.prompt_tokens)}</td><td>${fmt(r.completion_tokens)}</td><td>${fmt(r.total_tokens)}</td>
+    </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="error-msg">${e.message}</td></tr>`;
+  }
+}
+
+async function loadToolsTable() {
+  const { start, end } = getDateRange();
+  const tbody = document.getElementById('tbl-tools');
+  tbody.innerHTML = '<tr><td colspan="4" class="loading">Loading...</td></tr>';
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/tools?start=${start}&end=${end}`);
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);padding:1rem">No data</td></tr>'; return; }
+    tbody.innerHTML = rows.map((r, i) => `<tr class="${i < 3 ? 'top-row' : ''}">
+      <td>${r.tool_name}</td><td>${fmt(r.invocation_count)}</td>
+      <td>${r.avg_duration_ms != null ? r.avg_duration_ms.toFixed(1) : '—'}</td>
+      <td>${r.failure_rate != null ? r.failure_rate.toFixed(1) : '0.0'}</td>
+    </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" class="error-msg">${e.message}</td></tr>`;
+  }
+}
+
+async function loadSessionsTable() {
+  const { start, end } = getDateRange();
+  const tbody = document.getElementById('tbl-sessions');
+  tbody.innerHTML = '<tr><td colspan="2" class="loading">Loading...</td></tr>';
+  try {
+    const rows = await apiFetch(`/dashboard/api/telemetry/sessions?start=${start}&end=${end}`);
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="2" style="color:var(--text-muted);padding:1rem">No sessions</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `<tr class="session-row" data-tid="${r.thread_id}">
+      <td style="font-family:monospace;font-size:0.85rem">${truncate(r.thread_id, 32)}</td>
+      <td>${fmtDate(r.last_active)}</td>
+    </tr>`).join('');
+    tbody.querySelectorAll('.session-row').forEach(row => {
+      row.addEventListener('click', () => openSession(row.dataset.tid));
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="2" class="error-msg">${e.message}</td></tr>`;
+  }
+}
+
+async function openSession(threadId) {
+  document.getElementById('sessions-section').style.display = 'none';
+  const detail = document.getElementById('session-detail');
+  detail.classList.add('visible');
+  document.getElementById('session-title').textContent = 'Session: ' + truncate(threadId, 40);
+  document.getElementById('sd-tokens').textContent = '…';
+  document.getElementById('sd-loc').textContent = '…';
+  document.getElementById('tbl-sd-llm').innerHTML = '<tr><td colspan="5" class="loading">Loading...</td></tr>';
+  document.getElementById('tbl-sd-tools').innerHTML = '<tr><td colspan="4" class="loading">Loading...</td></tr>';
+  try {
+    const d = await apiFetch(`/dashboard/api/telemetry/sessions/${encodeURIComponent(threadId)}`);
+    document.getElementById('sd-tokens').textContent = fmt(d.total_tokens);
+    document.getElementById('sd-loc').textContent = fmt(d.total_loc);
+    const llmTbody = document.getElementById('tbl-sd-llm');
+    if (!d.llm_calls.length) {
+      llmTbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);padding:1rem">No LLM calls</td></tr>';
+    } else {
+      llmTbody.innerHTML = d.llm_calls.map(r => `<tr>
+        <td style="font-size:0.82rem">${fmtDate(r.timestamp)}</td>
+        <td>${r.model || '—'}</td><td>${fmt(r.prompt_tokens)}</td>
+        <td>${fmt(r.completion_tokens)}</td><td>${fmt(r.total_tokens)}</td>
+      </tr>`).join('');
+    }
+    const toolTbody = document.getElementById('tbl-sd-tools');
+    if (!d.tool_invocations.length) {
+      toolTbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);padding:1rem">No tool invocations</td></tr>';
+    } else {
+      toolTbody.innerHTML = d.tool_invocations.map(r => `<tr>
+        <td style="font-size:0.82rem">${fmtDate(r.timestamp)}</td>
+        <td style="font-family:monospace;font-size:0.85rem">${r.tool_name}</td>
+        <td>${r.duration_ms != null ? r.duration_ms.toFixed(1) : '—'}</td>
+        <td><span style="color:${r.status === 'failure' ? 'var(--error)' : 'var(--success)'}">${r.status || '—'}</span></td>
+      </tr>`).join('');
+    }
+  } catch (e) {
+    document.getElementById('tbl-sd-llm').innerHTML = `<tr><td colspan="5" class="error-msg">${e.message}</td></tr>`;
+    document.getElementById('tbl-sd-tools').innerHTML = `<tr><td colspan="4" class="error-msg">${e.message}</td></tr>`;
+  }
+}
+
+document.getElementById('btn-back').addEventListener('click', () => {
+  document.getElementById('session-detail').classList.remove('visible');
+  document.getElementById('sessions-section').style.display = '';
+});
+
+function loadAllObservability() {
+  loadSummary();
+  loadTokensChart();
+  loadCallsChart();
+  loadToolsChart();
+  loadLocChart();
+  loadModelsTable();
+  loadToolsTable();
+  loadSessionsTable();
+}
+
+document.getElementById('btn-apply').addEventListener('click', loadAllObservability);
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+let allToolNames = [];
+
+async function loadSettings() {
+  try {
+    const cfg = await apiFetch('/dashboard/api/config');
+    document.getElementById('cfg-provider').value = cfg.llm_provider || '';
+    document.getElementById('cfg-model').value = cfg.model_name || '';
+    document.getElementById('cfg-iter').value = cfg.iteration_limit ?? '';
+    document.getElementById('cfg-prompt').value = cfg.system_prompt || '';
+
+    // Build tool list
+    const enabled = new Set(cfg.enabled_tools || []);
+    const approval = new Set(cfg.approval_tools || []);
+    allToolNames = [...new Set([...enabled, ...approval])];
+
+    const list = document.getElementById('tools-list');
+    document.getElementById('tools-loading').style.display = 'none';
+    if (!allToolNames.length) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem">No tools configured.</div>';
+      return;
+    }
+    list.innerHTML = allToolNames.map(name => `
+      <div class="tool-item">
+        <span class="tool-name">${name}</span>
+        <label><input type="checkbox" class="tool-enabled" data-tool="${name}" ${enabled.has(name) ? 'checked' : ''} /> Enabled</label>
+        <label><input type="checkbox" class="tool-approval" data-tool="${name}" ${approval.has(name) ? 'checked' : ''} /> Requires Approval</label>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('tools-loading').textContent = 'Failed to load config: ' + e.message;
+    document.getElementById('tools-loading').className = 'error-msg';
+  }
+}
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const iterVal = parseInt(document.getElementById('cfg-iter').value, 10);
+  const errEl = document.getElementById('err-iter');
+  if (isNaN(iterVal) || iterVal < 1 || iterVal > 500) {
+    errEl.classList.add('visible');
+    return;
+  }
+  errEl.classList.remove('visible');
+
+  const enabledTools = [...document.querySelectorAll('.tool-enabled:checked')].map(el => el.dataset.tool);
+  const approvalTools = [...document.querySelectorAll('.tool-approval:checked')].map(el => el.dataset.tool);
+
+  const body = {
+    iteration_limit: iterVal,
+    system_prompt: document.getElementById('cfg-prompt').value,
+    enabled_tools: enabledTools,
+    approval_tools: approvalTools
+  };
+
+  try {
+    const res = await fetch('/dashboard/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+    showToast('Settings saved successfully.', 'success');
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+});
+
+document.getElementById('btn-reset-prompt').addEventListener('click', async () => {
+  try {
+    const res = await fetch('/dashboard/api/config/reset-prompt', { method: 'POST' });
+    if (!res.ok) throw new Error(res.statusText);
+    const cfg = await apiFetch('/dashboard/api/config');
+    document.getElementById('cfg-prompt').value = cfg.system_prompt || '';
+    showToast('Prompt reset to default.', 'success');
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+loadAllObservability();
+</script>
+</body>
+</html>

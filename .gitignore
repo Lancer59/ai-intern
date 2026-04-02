@@ -37,10 +37,12 @@ deepagents_data
 # IDEs
 .vscode/
 .idea/
+.kiro/
 
 # System Files
 .DS_Store
 Thumbs.db
+.files/
 
 # Chainlit config/translations should be tracked
 !.chainlit/config.toml

@@ -137,6 +137,7 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 - [ ] See content from python files of packages within the code base
 - [ ] Trust command (user based auth)
 - [ ] Unable to replace text trying different approach
+- [ ] Optimized for building requirements and technical documentation 
 ---
 
 ## License

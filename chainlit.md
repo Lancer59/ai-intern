@@ -1,14 +1,44 @@
-# Welcome to Chainlit! 🚀🤖
+# AI Intern — AI-Powered Coding Assistant
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+A web-based AI coding assistant built on [deepagents](https://github.com/langchain-ai/deepagents). It can explore, plan, and modify code in any local repository through this chat interface.
 
-## Useful Links 🔗
+---
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+## Getting Started
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+Enter the name of a **sibling project folder** (e.g. `my-project`) when prompted. The assistant will map it to the directory alongside `ai-intern/` and have full access to that repository.
 
-## Welcome screen
+---
 
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+## What it can do
+
+- **Plan first** — uses `write_todos` to create a task list before touching any code
+- **Explore efficiently** — `grep` and `glob` find files & line numbers directly
+- **Stream results in real-time** — tokens appear word-by-word, tool calls show as collapsible steps, and the task sidebar updates live
+- **Remember across turns** — within a session the agent remembers everything discussed
+- **Long-term memory** — saves project context to `/memories/context.md` across sessions
+- **Shell execution** — runs commands with approval prompts for destructive operations
+- **MCP tools** — Microsoft Docs, Tavily search, DeepWiki, and more
+
+---
+
+## LLM Providers supported
+
+Azure OpenAI · OpenAI · Google Gemini · Ollama (local)
+
+---
+
+## 📊 [Open Dashboard →](/dashboard)
+
+View observability metrics (token usage, tool stats, lines of code written) and edit agent settings (iteration limit, system prompt, allowed tools) from the dashboard.
+
+---
+
+## Persistent storage
+
+| File | Purpose |
+|---|---|
+| `agent_data/chainlit_ui.db` | Chat threads & message history |
+| `agent_data/checkpoints_lg.db` | LangGraph agent state per thread |
+| `agent_data/dashboard.db` | Telemetry & agent config |
+| `/memories/` | Cross-session long-term memory |
