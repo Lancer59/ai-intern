@@ -1,0 +1,26 @@
+# .ai-intern-rules
+# Place this file in the ROOT of your target repository (not the ai-intern folder).
+# The AI coding assistant will read it at session start and follow these rules strictly.
+# Rename to `.ai-intern-rules` to activate.
+
+## Stack
+- Language: Python 3.11
+- Framework: FastAPI
+- Database: PostgreSQL with SQLAlchemy
+- Tests: pytest
+
+## Conventions
+- Use snake_case for all variables and functions
+- All API endpoints must have docstrings
+- Never commit secrets or API keys
+- All new modules must have a corresponding test file in tests/
+
+## Workflow
+- Always run `pytest` before marking a task done
+- Use `black` for formatting before committing
+- Branch naming: feature/*, bugfix/*, hotfix/*
+
+## Off-limits
+- Do not modify alembic migration files directly
+- Do not delete any file in the `migrations/` folder
+- Never use `SELECT *` in raw SQL queries

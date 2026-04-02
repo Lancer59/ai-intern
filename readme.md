@@ -133,7 +133,7 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 - [ ] git tools so the coding agent can push code
 - [ ] Swap SQLite for PostgreSQL for multi-user production deployments
 - [ ] checkpointer in conversation 
-- [ ] No git tooling, no .ai-intern-rules project context file, no semantic repo map
+- [ ] Git tooling
 - [ ] See content from python files of packages within the code base
 - [ ] Trust command (user based auth)
 - [ ] Unable to replace text trying different approach

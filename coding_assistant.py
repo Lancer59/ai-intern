@@ -1,12 +1,75 @@
 import os
+import pathlib
 from llm_factory import get_llm
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend, CompositeBackend, StoreBackend
-from tools import think
+from tools import think, read_package_source
 from mcp_client import get_mcp_tools
 import logging
 
 logger = logging.getLogger("coding_assistant")
+
+# Directories to skip when building the repo map
+_SKIP_DIRS = {
+    ".git", "__pycache__", "node_modules", ".venv", "venv", "env",
+    "dist", "build", ".next", ".nuxt", "coverage", ".pytest_cache",
+    ".mypy_cache", ".tox", "*.egg-info",
+}
+# File extensions to include in the repo map
+_MAP_EXTENSIONS = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs", ".cs",
+    ".cpp", ".c", ".h", ".rb", ".php", ".swift", ".kt", ".scala",
+    ".html", ".css", ".scss", ".json", ".yaml", ".yml", ".toml",
+    ".md", ".sh", ".env.example", ".dockerfile", "dockerfile",
+}
+_MAX_MAP_FILES = 300  # cap to avoid huge prompts
+
+
+def _build_repo_map(workspace_path: str, repo_folder: str) -> str:
+    """Walk the workspace and return a compact tree of source files."""
+    lines = [f"## Repo Map: {repo_folder}/"]
+    count = 0
+    try:
+        for root, dirs, files in os.walk(workspace_path):
+            # Prune skip dirs in-place
+            dirs[:] = sorted(
+                d for d in dirs
+                if d not in _SKIP_DIRS and not d.startswith(".")
+            )
+            rel_root = os.path.relpath(root, workspace_path)
+            depth = 0 if rel_root == "." else rel_root.count(os.sep) + 1
+            indent = "  " * depth
+            folder_name = os.path.basename(root) if rel_root != "." else repo_folder
+            if rel_root != ".":
+                lines.append(f"{indent}📁 {folder_name}/")
+            for fname in sorted(files):
+                ext = pathlib.Path(fname).suffix.lower()
+                if ext in _MAP_EXTENSIONS or fname.lower() in {"makefile", "dockerfile", ".ai-intern-rules"}:
+                    file_indent = "  " * (depth + 1)
+                    lines.append(f"{file_indent}📄 {fname}")
+                    count += 1
+                    if count >= _MAX_MAP_FILES:
+                        lines.append(f"  ... (truncated at {_MAX_MAP_FILES} files)")
+                        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"Repo map generation failed: {e}")
+        return ""
+    return "\n".join(lines)
+
+
+def _read_ai_intern_rules(workspace_path: str) -> str:
+    """Read .ai-intern-rules from the target repo if it exists."""
+    rules_path = os.path.join(workspace_path, ".ai-intern-rules")
+    if os.path.exists(rules_path):
+        try:
+            with open(rules_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content:
+                logger.info(f"Loaded .ai-intern-rules from {rules_path}")
+                return content
+        except Exception as e:
+            logger.warning(f"Could not read .ai-intern-rules: {e}")
+    return ""
 
 
 async def create_coding_assistant(
@@ -44,9 +107,16 @@ async def create_coding_assistant(
     agent_folder = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
     repo_folder = os.path.basename(workspace_path)
 
+    # Build repo map and read project rules
+    repo_map = _build_repo_map(workspace_path, repo_folder)
+    ai_intern_rules = _read_ai_intern_rules(workspace_path)
+
+    repo_map_section = f"\n\n## Semantic Repo Map\nThis is the current file structure of the target repository:\n\n{repo_map}" if repo_map else ""
+    rules_section = f"\n\n## Project-Specific Rules (.ai-intern-rules)\nThe project has defined the following rules and conventions — follow them strictly:\n\n{ai_intern_rules}" if ai_intern_rules else ""
+
     if system_prompt is not None:
-        # Apply workspace-specific substitutions to the custom prompt
         resolved_prompt = system_prompt.replace("{agent_folder}", agent_folder).replace("{repo_folder}", repo_folder)
+        resolved_prompt += repo_map_section + rules_section
     else:
         resolved_prompt = (
             "You are a world-class AI Software Engineer.\n\n"
@@ -79,39 +149,59 @@ async def create_coding_assistant(
             "Use deepwiki tools with this\n\n"
             "For anything related to Microsoft:\n"
             "Use the microsoft-docs tools\n\n"
+            "Package Source Inspection:\n"
+            "- Use the 'read_package_source' tool to read the source code of any installed package.\n"
+            "- Example: read_package_source('langgraph.prebuilt.chat_agent_executor') to see how create_react_agent is implemented.\n"
+            "- Use this BEFORE implementing anything that depends on a library's internals — don't guess, read the source.\n\n"
             "Rules:\n"
             "1. Always explore the project first using 'ls' or 'grep' to understand the context.\n"
             "2. Be concise and professional.\n"
             "3. Before executing potentially destructive shell commands, explain what you are doing.\n"
             "4. If you make changes, verify them (e.g., by running tests if possible).\n"
             "5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists.\n"
-        )
+        ) + repo_map_section + rules_section
 
     logger.info("Fetching MCP tools...")
     mcp_tools = await get_mcp_tools()
     logger.info(f"MCP tools loaded: {[t.name for t in mcp_tools]}")
 
-    all_tools = mcp_tools + [think]
+    # Core local tools — always included regardless of enabled_tools filter
+    core_tools = [think, read_package_source]
+    all_tools = mcp_tools + core_tools
+
     if enabled_tools is not None:
         enabled_set = set(enabled_tools)
-        # Match exact tool names OR group prefixes (e.g. "tavily" matches "tavily_search")
+        # Check if any new tools are missing from the stored list and add them
+        all_tool_names = [t.name for t in all_tools]
+        new_tools = [n for n in all_tool_names if n not in enabled_set]
+        if new_tools:
+            logger.info(f"New tools not in stored config, adding: {new_tools}")
+            enabled_set.update(new_tools)
+            try:
+                from dashboard_db import get_config, save_config
+                cfg = await get_config()
+                # Merge: keep existing enabled state, add new tools as enabled
+                cfg["enabled_tools"] = list(enabled_set)
+                await save_config(cfg)
+            except Exception as e:
+                logger.warning(f"Could not sync new tool names to config: {e}")
+
         def _tool_allowed(t):
-            return t.name in enabled_set or any(t.name.startswith(prefix) for prefix in enabled_set)
+            return t.name in enabled_set or any(t.name.startswith(p) for p in enabled_set)
         filtered = [t for t in all_tools if _tool_allowed(t)]
-        # If filtering wiped out almost everything (only think left or empty),
-        # it likely means the DB has stale group names — fall back to all tools
-        # and update the config with real names so next session is correct.
-        if len(filtered) <= 1 and len(all_tools) > 1:
-            logger.warning("Tool filter produced too few results — stored names may be stale group names. Using all tools and updating config.")
+        # Self-heal: if stale group names wiped all MCP tools, reset to all
+        mcp_filtered = [t for t in filtered if t.name not in {c.name for c in core_tools}]
+        if len(mcp_filtered) == 0 and len(mcp_tools) > 0:
+            logger.warning("Tool filter removed all MCP tools — stored names may be stale. Resetting config.")
             filtered = all_tools
             try:
                 from dashboard_db import get_config, save_config
                 cfg = await get_config()
                 cfg["enabled_tools"] = [t.name for t in all_tools]
                 await save_config(cfg)
-                logger.info(f"Updated enabled_tools in config to actual tool names: {cfg['enabled_tools']}")
+                logger.info(f"Reset enabled_tools in config: {cfg['enabled_tools']}")
             except Exception as e:
-                logger.warning(f"Could not update tool names in config: {e}")
+                logger.warning(f"Could not reset tool names in config: {e}")
         all_tools = filtered
         logger.info(f"Tools filtered to: {[t.name for t in all_tools]}")
 
