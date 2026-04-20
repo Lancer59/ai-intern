@@ -9,19 +9,29 @@ AI Intern is a robust, agentic AI coding assistant designed to help developers e
 - **Filesystem & Shell Mastery**: Uses `LocalShellBackend` to safely construct a virtual workspace environment. Capable of exploration (`ls`, `find_by_name`), file manipulation (`read_file`, `write_file`, `edit_file`), full-text search (`grep_search`), and executing terminal commands (`execute`).
 - **Model Context Protocol (MCP)**: Native integration via `langchain_mcp_adapters` allows the agent to connect automatically to standardized external APIs and context servers (e.g., Microsoft Docs MCP Server) and invoke them seamlessly as built-in tools.
 - **Custom Extensibility**: The system is designed for arbitrary custom tool injection (via `tools.py`). Currently, it features a custom `think` tool which lets the agent isolate complex reasoning chains before acting on code.
-- **Interactive, Context-Rich UI**: Powered by Chainlit. It interprets `on_tool_start` and `on_tool_end` streaming events to present dynamic status bars ("Thinking...", "Editing...", "Listing..."). It overlays clean, intuitive visual components over raw tool execution output (such as Custom Diff Viewer and Terminal Output blocks) while tracking persistent thread status via LangGraph's checkpointer.
+- **Interactive, Context-Rich UI**: Powered by Chainlit. It interprets `on_tool_start` and `on_tool_end` streaming events to present dynamic status bars ("Thinking...", "Editing...", "Listing..."). It overlays clean, intuitive visual components over raw tool execution output (such as Custom Diff Viewer and Terminal Output blocks).
+- **Admin Dashboard & Observability**: Includes a dedicated FastAPI-based dashboard for real-time monitoring. It tracks LLM token usage, tool performance, and lines of code (LOC) changes, while providing an interface to dynamically update agent settings (system prompts, iteration limits).
 
 ## Architecture Diagram
 
 ```mermaid
 graph TD
     User([User]) --> UI[Chainlit Web UI / CLI]
+    User --> Dash[Admin Dashboard]
     UI --> Assistant[Coding Assistant / DeepAgent]
+    Dash --> DashAPI[Dashboard API / app.py]
     
     subgraph Core Components
         Assistant --> llm_factory[LLM Factory]
         llm_factory --> Model[(LLM: Azure/OpenAI/Gemini/Ollama)]
         Assistant --> memory_saver[LangGraph Checkpointer MemorySaver]
+        Assistant --> telemetry[Telemetry Recorder]
+    end
+
+    subgraph Persistence
+        memory_saver --> lg_db[(checkpoints_lg.db)]
+        telemetry --> dash_db[(dashboard.db)]
+        UI -.-> ui_db[(chainlit_ui.db)]
     end
 
     subgraph Tool Context
@@ -34,6 +44,7 @@ graph TD
         Assistant --> custom_tools[Custom Langchain Tools / Think]
     end
     
+    DashAPI --> dash_db
     Assistant --> UI_streaming[Real-time Token & Multi-modal Streaming]
     UI_streaming --> UI
 ```

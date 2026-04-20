@@ -11,6 +11,7 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 - **Model Context Protocol (MCP)** — Native integration via `langchain_mcp_adapters` to connect standard MCP servers (e.g., Microsoft Docs) for extended context.
 - **Custom Tooling Extensibility** — Includes robust custom tools (such as `think` for deep reasoning) loaded directly into the agent mapping.
 - **Chainlit Web UI** — Real-time token streaming, custom aesthetic tool step indicators ("Editing...", "Thinking..."), inline visual Diff and Terminal blocks, and a dynamic **Tasks** sidebar.
+- **Admin Dashboard** — Integrated FastAPI dashboard for observability (token usage, tool stats, LOC) and real-time agent configuration (system prompt, iteration limits).
 - **In-Memory Persistence** — Conversation memory is maintained across turns within a session via LangGraph's `MemorySaver` checkpointer with unique `thread_id`s.
 - **CLI Mode** — Lightweight terminal interface for quick interactions.
 
@@ -24,7 +25,11 @@ ai-intern/
 ├── coding_assistant.py      # DeepAgent configuration & system prompt
 ├── mcp_client.py            # Model Context Protocol server configuration
 ├── tools.py                 # Custom Langchain tools (e.g., think)
-├── assistant_ui.py          # Chainlit web UI (main entry point)
+├── assistant_ui.py          # Chainlit web UI
+├── dashboard/               # Dashboard frontend (React/HTML)
+├── dashboard_api.py         # Dashboard FastAPI backend
+├── dashboard_db.py          # Dashboard database logic
+├── app.py                   # Combined production entry point (Chat + Dashboard)
 ├── assistant_cli.py         # CLI interface (alternative)
 ├── .env.example             # Template for API keys
 ├── requirements-simple.txt  # Core dependencies
@@ -57,10 +62,11 @@ cp .env.example .env
 ### 3. Run the Web UI
 
 ```bash
-# First time only — create the Chainlit SQLite schema
+# First time only — create the SQLite schemas
 python init_db.py
 
-chainlit run assistant_ui.py
+# Run the combined app (Chat at / and Dashboard at /dashboard)
+uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
 Open [http://localhost:8000](http://localhost:8000) and enter the name of a sibling project folder (e.g., `my-project`). The assistant will have full access to that repository.
@@ -70,6 +76,18 @@ Open [http://localhost:8000](http://localhost:8000) and enter the name of a sibl
 ```bash
 python assistant_cli.py
 ```
+
+---
+
+## Admin Dashboard
+
+The project includes a built-in dashboard for monitoring and configuration:
+
+- **Observability**: Track token usage (prompt vs completion), model distribution, and tool invocation stats.
+- **Agent Configuration**: Edit the system prompt, iteration limits, and toggle specific tools on/off in real-time.
+- **Session History**: View detailed logs of past conversations, including exact tool calls and durations.
+
+Access it at [http://localhost:8000/dashboard](http://localhost:8000/dashboard) when running via `app.py`.
 
 ---
 

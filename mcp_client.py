@@ -1,5 +1,8 @@
 import os
+import logging
 from langchain_mcp_adapters.client import MultiServerMCPClient
+
+logger = logging.getLogger(__name__)
 
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 # Standardized MCP Server Configurations
@@ -19,8 +22,12 @@ MCP_CONFIGS = {
     }
 }
 async def get_mcp_tools():
-    client = MultiServerMCPClient(
-        MCP_CONFIGS
-    )
-    tools = await client.get_tools()
-    return tools
+    try:
+        client = MultiServerMCPClient(
+            MCP_CONFIGS
+        )
+        tools = await client.get_tools()
+        return tools
+    except Exception as e:
+        logger.warning(f"mcp tools are not loaded: {e}")
+        return []

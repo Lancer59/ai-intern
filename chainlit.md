@@ -30,7 +30,10 @@ Azure OpenAI · OpenAI · Google Gemini · Ollama (local)
 
 ## 📊 [Open Dashboard →](/dashboard)
 
-View observability metrics (token usage, tool stats, lines of code written) and edit agent settings (iteration limit, system prompt, allowed tools) from the dashboard.
+View observability metrics (token usage, tool stats, lines of code written) and edit agent settings (iteration limit, system prompt, allowed tools) from the combined dashboard.
+
+> [!NOTE]
+> The dashboard is only available when running the application via `uvicorn app:app`. If running via `chainlit run`, this link will redirect back to the chat.
 
 ---
 
