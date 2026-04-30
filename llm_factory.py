@@ -13,7 +13,7 @@ load_dotenv()
 def get_llm(
     provider: str,
     model_name: Optional[str] = None,
-    temperature: float = 0.7,
+    temperature: float = 1,
     **kwargs
 ) -> Union[ChatOpenAI, AzureChatOpenAI, ChatGoogleGenerativeAI, ChatOllama]:
     """

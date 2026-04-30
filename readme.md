@@ -10,6 +10,7 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 - **Deep Agent** — Powered by `deepagents` with built-in planning (`write_todos`), filesystem tools (`ls`, `read_file`, `write_file`, `edit_file`, `grep`, `glob`), shell execution, and sub-agent spawning.
 - **Model Context Protocol (MCP)** — Native integration via `langchain_mcp_adapters` to connect standard MCP servers (e.g., Microsoft Docs) for extended context.
 - **Custom Tooling Extensibility** — Includes robust custom tools (such as `think` for deep reasoning) loaded directly into the agent mapping.
+- **Browser Interaction (Playwright + Edge)** — Five built-in browser tools let the agent visually verify frontend work: take screenshots, capture JS console logs, read the DOM, click elements, and detect failed network requests — all driven headlessly through your installed Microsoft Edge.
 - **Chainlit Web UI** — Real-time token streaming, custom aesthetic tool step indicators ("Editing...", "Thinking..."), inline visual Diff and Terminal blocks, and a dynamic **Tasks** sidebar.
 - **Admin Dashboard** — Integrated FastAPI dashboard for observability (token usage, tool stats, LOC) and real-time agent configuration (system prompt, iteration limits).
 - **In-Memory Persistence** — Conversation memory is maintained across turns within a session via LangGraph's `MemorySaver` checkpointer with unique `thread_id`s.
@@ -25,6 +26,7 @@ ai-intern/
 ├── coding_assistant.py      # DeepAgent configuration & system prompt
 ├── mcp_client.py            # Model Context Protocol server configuration
 ├── tools.py                 # Custom Langchain tools (e.g., think)
+├── browser_tools.py         # Playwright browser tools (screenshot, DOM, console, network)
 ├── assistant_ui.py          # Chainlit web UI
 ├── dashboard/               # Dashboard frontend (React/HTML)
 ├── dashboard_api.py         # Dashboard FastAPI backend
@@ -88,6 +90,42 @@ The project includes a built-in dashboard for monitoring and configuration:
 - **Session History**: View detailed logs of past conversations, including exact tool calls and durations.
 
 Access it at [http://localhost:8000/dashboard](http://localhost:8000/dashboard) when running via `app.py`.
+
+---
+
+## Browser Interaction Tools
+
+The agent can interact with a running browser to verify frontend changes without any manual DevTools work. All tools are powered by Playwright and use your system-installed **Microsoft Edge** — no extra browser download needed.
+
+| Tool | What it does |
+|------|-------------|
+| `browser_screenshot` | Navigates to a URL and returns a screenshot rendered inline in the chat |
+| `browser_get_console_logs` | Captures all `console.error`, `console.warn`, and `console.log` output during page load |
+| `browser_get_dom` | Returns the `outerHTML` of a CSS selector or the full `body.innerHTML` |
+| `browser_click_and_screenshot` | Clicks an element by CSS selector and screenshots the resulting state |
+| `browser_get_network_errors` | Lists all HTTP 4xx/5xx responses and failed requests during page load |
+
+**Setup** — just install the Python package, no browser binary download required (If you have MS Edge, else download is required.):
+
+```bash
+pip install playwright
+# playwright install msedge  ← only if Edge isn't already on your machine
+```
+
+**External URL access** — by default all tools allow navigation to any URL including cloud/public sites. To restrict to `localhost` only (e.g. for a sandboxed environment), pass `allow_external=False` when calling any browser tool, or flip the default in `browser_tools.py`:
+
+```python
+# browser_tools.py — change the default on any tool signature
+async def browser_screenshot(url: str, ..., allow_external: bool = False):  # locked to localhost
+async def browser_screenshot(url: str, ..., allow_external: bool = True):   # allows all URLs (default)
+```
+
+**Self-healing loop example** — the agent can chain these tools automatically:
+
+```
+edit_file → execute (npm run dev) → browser_screenshot
+         → browser_get_console_logs → [errors found] → think → edit_file → ...
+```
 
 ---
 
@@ -156,6 +194,7 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 - [ ] Trust command (user based auth)
 - [ ] Unable to replace text trying different approach
 - [ ] Optimized for building requirements and technical documentation 
+- [ ] Extend configurability (Ex: add edge/chrome option for playwright)
 ---
 
 ## License

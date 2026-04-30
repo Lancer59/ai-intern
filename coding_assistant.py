@@ -4,6 +4,13 @@ from llm_factory import get_llm
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend, CompositeBackend, StoreBackend
 from tools import think, read_package_source
+from browser_tools import (
+    browser_screenshot,
+    browser_get_console_logs,
+    browser_get_dom,
+    browser_click_and_screenshot,
+    browser_get_network_errors,
+)
 from mcp_client import get_mcp_tools
 import logging
 
@@ -166,7 +173,15 @@ async def create_coding_assistant(
     logger.info(f"MCP tools loaded: {[t.name for t in mcp_tools]}")
 
     # Core local tools — always included regardless of enabled_tools filter
-    core_tools = [think, read_package_source]
+    core_tools = [
+        think,
+        read_package_source,
+        browser_screenshot,
+        browser_get_console_logs,
+        browser_get_dom,
+        browser_click_and_screenshot,
+        browser_get_network_errors,
+    ]
     all_tools = mcp_tools + core_tools
 
     if enabled_tools is not None:

@@ -8,3 +8,4 @@ langchain-mcp-adapters
 langgraph-checkpoint-sqlite
 aiosqlite
 SQLAlchemy
+playwright>=1.44.0

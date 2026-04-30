@@ -229,6 +229,9 @@ async def main(message: cl.Message):
                         "write_file": "Creating...", "read_file": "Analyzing...", "view_file": "Analyzing...",
                         "edit_file": "Editing...", "execute": "Executing...", "ls": "Listing...",
                         "grep_search": "Searching...", "write_todos": "Updating todos...", "think": "Thinking...",
+                        "browser_screenshot": "📸 Screenshotting...", "browser_get_console_logs": "🖥️ Reading console...",
+                        "browser_get_dom": "🔍 Reading DOM...", "browser_click_and_screenshot": "🖱️ Clicking...",
+                        "browser_get_network_errors": "🌐 Checking network...",
                     }
                     display_name = f"{display_map.get(tool_name, f'Tool: {tool_name}')} {tool_input or ''}"
                     step = cl.Step(name=display_name, type="tool", parent_id=stream_msg.id)
@@ -307,6 +310,34 @@ async def main(message: cl.Message):
                                                         "exit_code": parse_exit_code(output_str)}, display="inline").send(for_id=stream_msg.id)
                             except Exception as e:
                                 logger.warning(f"TerminalOutput render failed: {e}")
+
+                    # Render browser tool outputs inline
+                    if tool_name in ("browser_screenshot", "browser_click_and_screenshot"):
+                        result_str = extract_tool_result(tool_output)
+                        if result_str.startswith("data:image/png;base64,"):
+                            try:
+                                img_b64 = result_str.split(",", 1)[1]
+                                img_bytes = base64.b64decode(img_b64)
+                                await cl.Image(
+                                    name=f"{tool_name}.png",
+                                    content=img_bytes,
+                                    mime="image/png",
+                                    display="inline",
+                                ).send(for_id=stream_msg.id)
+                            except Exception as e:
+                                logger.warning(f"Browser screenshot render failed: {e}")
+
+                    elif tool_name in ("browser_get_console_logs", "browser_get_network_errors", "browser_get_dom"):
+                        result_str = extract_tool_result(tool_output)
+                        if result_str and not result_str.startswith("Error"):
+                            try:
+                                await cl.CustomElement(
+                                    name="TerminalOutput",
+                                    props={"command": tool_name, "output": result_str, "exit_code": 0},
+                                    display="inline",
+                                ).send(for_id=stream_msg.id)
+                            except Exception as e:
+                                logger.warning(f"Browser tool output render failed: {e}")
 
                     if tool_name == "write_todos" and tool_output:
                         try:
