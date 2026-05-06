@@ -1,6 +1,6 @@
 import asyncio
 import os
-from coding_assistant import create_coding_assistant
+from core.coding_assistant import create_coding_assistant
 
 async def main():
     print("=== AI Coding Assistant CLI ===")

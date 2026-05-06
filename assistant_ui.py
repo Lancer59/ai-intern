@@ -11,9 +11,8 @@ from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.memory import InMemoryStore
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-from coding_assistant import create_coding_assistant
-from langgraph.types import Command
-from dashboard_db import init_db, get_config, record_llm_call, record_tool_invocation_start, record_tool_invocation_end, record_loc_event
+from core.coding_assistant import create_coding_assistant
+from dashboard.db import init_db, get_config, record_llm_call, record_tool_invocation_start, record_tool_invocation_end, record_loc_event
 
 load_dotenv()
 
@@ -232,6 +231,12 @@ async def main(message: cl.Message):
                         "browser_screenshot": "📸 Screenshotting...", "browser_get_console_logs": "🖥️ Reading console...",
                         "browser_get_dom": "🔍 Reading DOM...", "browser_click_and_screenshot": "🖱️ Clicking...",
                         "browser_get_network_errors": "🌐 Checking network...",
+                        "git_clone": "📥 Cloning repo...", "git_status": "🔍 Checking git status...",
+                        "git_diff": "📄 Reading diff...", "git_log": "📜 Reading log...",
+                        "git_blame": "🔎 Reading blame...", "git_commit": "💾 Committing...",
+                        "git_create_branch": "🌿 Creating branch...", "git_checkout": "🔀 Checking out...",
+                        "git_push": "🚀 Pushing...", "git_pull": "⬇️ Pulling...",
+                        "git_stash": "📦 Stashing...", "git_generate_commit_message": "✍️ Generating commit message...",
                     }
                     display_name = f"{display_map.get(tool_name, f'Tool: {tool_name}')} {tool_input or ''}"
                     step = cl.Step(name=display_name, type="tool", parent_id=stream_msg.id)
@@ -310,6 +315,35 @@ async def main(message: cl.Message):
                                                         "exit_code": parse_exit_code(output_str)}, display="inline").send(for_id=stream_msg.id)
                             except Exception as e:
                                 logger.warning(f"TerminalOutput render failed: {e}")
+
+                    # Render git tool outputs inline
+                    if tool_name == "git_diff":
+                        result_str = extract_tool_result(tool_output)
+                        if result_str and not result_str.startswith("Error"):
+                            try:
+                                await cl.CustomElement(
+                                    name="DiffViewer",
+                                    props={"filename": str(tool_input) if tool_input else "diff",
+                                           "old_str": "", "new_str": result_str,
+                                           "result_msg": "git diff", "is_new_file": False},
+                                    display="inline",
+                                ).send(for_id=stream_msg.id)
+                            except Exception as e:
+                                logger.warning(f"git_diff DiffViewer render failed: {e}")
+
+                    elif tool_name in ("git_log", "git_status", "git_blame", "git_clone",
+                                       "git_commit", "git_push", "git_pull",
+                                       "git_create_branch", "git_checkout", "git_stash"):
+                        result_str = extract_tool_result(tool_output)
+                        if result_str and not result_str.startswith("Error"):
+                            try:
+                                await cl.CustomElement(
+                                    name="TerminalOutput",
+                                    props={"command": tool_name, "output": result_str, "exit_code": 0},
+                                    display="inline",
+                                ).send(for_id=stream_msg.id)
+                            except Exception as e:
+                                logger.warning(f"Git tool output render failed: {e}")
 
                     # Render browser tool outputs inline
                     if tool_name in ("browser_screenshot", "browser_click_and_screenshot"):

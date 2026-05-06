@@ -11,6 +11,7 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 - **Model Context Protocol (MCP)** — Native integration via `langchain_mcp_adapters` to connect standard MCP servers (e.g., Microsoft Docs) for extended context.
 - **Custom Tooling Extensibility** — Includes robust custom tools (such as `think` for deep reasoning) loaded directly into the agent mapping.
 - **Browser Interaction (Playwright + Edge)** — Five built-in browser tools let the agent visually verify frontend work: take screenshots, capture JS console logs, read the DOM, click elements, and detect failed network requests — all driven headlessly through your installed Microsoft Edge.
+- **Git Version Control** — 12 built-in Git tools let the agent clone repos from a URL, read diffs and history, commit its own work, branch safely before risky changes, push/pull to remotes, and generate AI-written commit messages.
 - **Chainlit Web UI** — Real-time token streaming, custom aesthetic tool step indicators ("Editing...", "Thinking..."), inline visual Diff and Terminal blocks, and a dynamic **Tasks** sidebar.
 - **Admin Dashboard** — Integrated FastAPI dashboard for observability (token usage, tool stats, LOC) and real-time agent configuration (system prompt, iteration limits).
 - **In-Memory Persistence** — Conversation memory is maintained across turns within a session via LangGraph's `MemorySaver` checkpointer with unique `thread_id`s.
@@ -22,22 +23,36 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 
 ```
 ai-intern/
-├── llm_factory.py           # Multi-provider LLM initialization
-├── coding_assistant.py      # DeepAgent configuration & system prompt
-├── mcp_client.py            # Model Context Protocol server configuration
-├── tools.py                 # Custom Langchain tools (e.g., think)
-├── browser_tools.py         # Playwright browser tools (screenshot, DOM, console, network)
-├── assistant_ui.py          # Chainlit web UI
-├── dashboard/               # Dashboard frontend (React/HTML)
-├── dashboard_api.py         # Dashboard FastAPI backend
-├── dashboard_db.py          # Dashboard database logic
-├── app.py                   # Combined production entry point (Chat + Dashboard)
-├── assistant_cli.py         # CLI interface (alternative)
+├── app.py                   # Production entry point (Chat + Dashboard combined)
+├── assistant_ui.py          # Chainlit web UI — streaming, tool rendering, auth
+├── assistant_cli.py         # Lightweight CLI interface
+├── init_db.py               # One-time DB schema setup
+│
+├── core/                    # Agent brain
+│   ├── coding_assistant.py  # DeepAgent setup, system prompt, tool wiring
+│   ├── llm_factory.py       # Multi-provider LLM initialization
+│   └── mcp_client.py        # MCP server configuration & tool loading
+│
+├── tools/                   # All LangChain tools
+│   ├── custom_tools.py      # think, read_package_source
+│   ├── browser_tools.py     # Playwright browser tools (screenshot, DOM, console, network)
+│   └── git_tools.py         # Git tools (clone, diff, commit, push, branch, log, blame...)
+│
+├── dashboard/               # Admin dashboard
+│   ├── api.py               # FastAPI routes (observability + config endpoints)
+│   ├── db.py                # SQLite helpers (telemetry, config persistence)
+│   └── static/              # Dashboard frontend (HTML/JS)
+│
+├── public/                  # Chainlit custom UI elements
+│   └── elements/
+│       ├── DiffViewer.jsx
+│       └── TerminalOutput.jsx
+│
+├── agent_data/              # Runtime databases (gitignored)
 ├── .env.example             # Template for API keys
+├── .ai-intern-rules.example # Template for project-level rules
 ├── requirements-simple.txt  # Core dependencies
-├── requirements.txt         # Full pip freeze
-├── architecture.md          # Architectural overview, diagram, and usecases 
-└── readme.md
+└── requirements.txt         # Full pip freeze
 ```
 
 ---
@@ -127,6 +142,61 @@ edit_file → execute (npm run dev) → browser_screenshot
          → browser_get_console_logs → [errors found] → think → edit_file → ...
 ```
 
+**Self-healing loop example** — the agent can chain these tools automatically:
+
+```
+edit_file → execute (npm run dev) → browser_screenshot
+         → browser_get_console_logs → [errors found] → think → edit_file → ...
+```
+
+---
+
+## Git Tools
+
+The agent has full Git awareness via 12 built-in tools backed by **GitPython**. Just share a remote URL and the agent can clone, explore, modify, commit, and push — all from the chat.
+
+### Cloning a repo
+
+Tell the agent: *"Clone https://github.com/user/repo and work on it"* — it will call `git_clone` and immediately have the repo available as a workspace.
+
+### All available tools
+
+| Tool | Type | What it does |
+|------|------|-------------|
+| `git_clone` | Write | Clones a remote URL into the workspace parent directory |
+| `git_status` | Read | Shows staged, modified, and untracked files |
+| `git_diff` | Read | Returns unified diff of working tree or staged changes |
+| `git_log` | Read | Returns recent commit history as structured JSON |
+| `git_blame` | Read | Returns line-by-line authorship for a file |
+| `git_commit` | Write | Stages files and creates a commit |
+| `git_create_branch` | Write | Creates and checks out a new branch |
+| `git_checkout` | Write | Switches branch or restores a file to HEAD |
+| `git_push` | Write | Pushes current branch to remote (never force-pushes) |
+| `git_pull` | Write | Pulls latest changes from remote |
+| `git_stash` | Write | Stashes or restores uncommitted changes |
+| `git_generate_commit_message` | AI | Reads staged diff and generates a conventional-commits message |
+
+### Safe experimentation mode
+
+Before making risky or large-scale changes, the agent automatically:
+1. Checks `git_status` to confirm the repo is clean
+2. Creates a new branch (`ai-intern/<task-slug>`) via `git_create_branch`
+3. Makes all changes on that branch
+4. Commits with an AI-generated message
+
+If you dislike the result, just delete the branch — `main` is untouched.
+
+### Approval gates
+
+`git_commit`, `git_push`, `git_pull`, and `git_checkout` trigger the existing human-in-the-loop approval prompt in the Chainlit UI before executing. Read-only tools (`git_status`, `git_diff`, `git_log`, `git_blame`) run without interruption.
+
+### Setup
+
+```bash
+pip install gitpython
+# git must be installed and on PATH (standard on any dev machine)
+```
+
 ---
 
 ## How It Works
@@ -186,11 +256,11 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 - [ ] Project-level `AGENTS.md` for persistent context
 - [ ] Agent skills which can be added dynamically
 - [ ] Set iteration limit dynamically for each query
-- [ ] git tools so the coding agent can push code
+- [x] git tools so the coding agent can push code
 - [ ] Swap SQLite for PostgreSQL for multi-user production deployments
 - [ ] checkpointer in conversation 
-- [ ] Git tooling
-- [ ] See content from python files of packages within the code base
+- [x] Git tooling (clone, diff, commit, push, pull, branch, blame, stash, AI commit messages)
+- [x] See content from python files of packages within the code base
 - [ ] Trust command (user based auth)
 - [ ] Unable to replace text trying different approach
 - [ ] Optimized for building requirements and technical documentation 

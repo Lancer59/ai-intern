@@ -13,7 +13,7 @@ For development (Chainlit only, with hot-reload):
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from chainlit.utils import mount_chainlit
-from dashboard_api import dashboard_app
+from dashboard.api import dashboard_app
 
 
 @asynccontextmanager

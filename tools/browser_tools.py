@@ -45,7 +45,7 @@ async def _get_playwright():
 
 
 @tool
-async def browser_screenshot(url: str, wait_for: str = "", full_page: bool = False, allow_external: bool = Flase) -> str:
+async def browser_screenshot(url: str, wait_for: str = "", full_page: bool = False, allow_external: bool = True) -> str:
     """Navigate to a URL and return a base64-encoded PNG screenshot.
 
     Only localhost/127.0.0.1 URLs are permitted unless allow_external=True.

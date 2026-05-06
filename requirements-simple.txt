@@ -9,3 +9,4 @@ langgraph-checkpoint-sqlite
 aiosqlite
 SQLAlchemy
 playwright>=1.44.0
+gitpython>=3.1.40

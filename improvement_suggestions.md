@@ -4,41 +4,103 @@ Based on an analysis of current market leaders in AI-assisted development (such 
 
 ---
 
-## 1. Deep Context & Codebase Understanding (Inspired by Cursor & Aider)
-Currently, AI Intern relies on `grep` and `glob` to navigate the file system. While effective for small projects, larger codebases require deeper, structured context.
-*   **Semantic Repository Map:** Implement a lightweight `ctags` or Tree-sitter based parser to generate a condensed map of all classes, functions, and interfaces. Provide this "repo map" in the system prompt so the AI inherently knows the architecture without needing to manually `grep`.
-*   **Vector Search Navigation:** Integrate a local embedder (like `ChromaDB` or `FAISS`) to allow semantic search through the code. Developers could ask "Where is the authentication logic?" and the agent can immediately jump to the relevant files.
+## ✅ 1. Deep Context & Codebase Understanding (Inspired by Cursor & Aider)
+**Status: Partially implemented**
 
-## 2. Granular, Diff-based File Editing (Inspired by Aider)
-Replacing entire files or using naive string replacement becomes fragile and expensive (token-wise) on files containing hundreds of lines.
-*   **Search/Replace Blocks:** Implement a tool similar to Aider's `SEARCH/REPLACE` blocks. The AI outputs only the chunk of code being changed, preceded by the exact existing lines.
-*   **Unified Diff Output:** Allow the AI to output unified diffs that the backend applies locally. This drastically speeds up execution and prevents LLM truncation on large files.
-
-## 3. Autonomous Execution & Self-Healing (Inspired by Cline)
-Currently, AI Intern plans and then modifies. It can be taken a step further by granting it real "Agentic" verification loops.
-*   **Auto-Linting & Test Loops:** After editing a file, AI Intern should automatically run the project's linter (e.g., `flake8`, `eslint`) or unit tests. If an error occurs, it should capture the stderr/stdout and autonomously fix its own mistakes before declaring the task "done".
-*   **Browser Interaction:** For frontend work, give the agent access to a Playwright/Puppeteer tool allowing it to view renders, take screenshots, read the DOM, or spot UI errors (Console traces).
-
-## 4. IDE Integration or Editor Proximity (Inspired by Cursor/Copilot)
-While Chainlit provides a beautiful UI, switching contexts between an IDE and a browser breaks developer flow.
-*   **VS Code / JetBrains Plugin:** Expose a local REST/WebSocket API from the AI Intern core and build a lightweight VS Code extension. This allows the AI to see the developer's exact cursor position, open tabs, and selected text.
-*   **Inline Code Completion:** Offer rapid, local autocomplete for inline suggestions (perhaps leveraging the existing Ollama integration) while reserving the complex reasoning API for the chat pane.
-
-## 5. Advanced Version Control (Git) Integrations
-*   **Contextual Commits:** Add a feature where AI Intern can read the `git diff` of the working directory and automatically generate a high-quality, descriptive commit message.
-*   **Safe Experimentation Mode:** Before making a series of destructive changes, teach the tool to automatically branch out (`git checkout -b ai-intern-experiment`). If the user dislikes the result, they can click a "Discard" button that hard resets the branch.
-
-## 6. Dynamic Context Loading (File Drag-and-Drop)
-*   Allow developers to manually drag and drop images, architectural diagrams, browser screenshots, or external documentation links directly into the Chainlit chat UI. The agent should be able to parse images using vision models or fetch external pages on-the-fly.
-
-## 7. Configuration and Rules (Project-Level Memory)
-*   **`.ai-intern-rules` file:** Similar to Cursor's `.cursorrules`, allow developers to create a markdown file at the root of their repository that dictates coding standards (e.g., "Always use functional React components", "Never use 'any' in TypeScript"). This file should be automatically prepended to the system context for all queries in that project.
+*   **✅ Semantic Repository Map:** A lightweight file-tree based repo map is generated at session start and injected into the system prompt (`_build_repo_map` in `core/coding_assistant.py`). The agent knows the full file structure without needing to manually `ls`.
+*   **⬜ Vector Search Navigation:** Not yet implemented. Integrating a local embedder (like `ChromaDB` or `FAISS`) would allow semantic search — e.g. "Where is the authentication logic?" — jumping directly to relevant files without grep.
 
 ---
 
-### Priority Implementation Roadmap
-For the highest ROI with the least effort based on your current `deepagents` architecture:
-1.  **High Priority:** Diff-based File Editing (saves API costs, faster).
-2.  **High Priority:** `.ai-intern-rules` project memory file.
-3.  **Medium Priority:** System-wide Repository Map (`tree`/`ctags` parser).
-4.  **Medium Priority:** Git integration (diff reading & commit generation).
+## ⬜ 2. Granular, Diff-based File Editing (Inspired by Aider)
+**Status: Not implemented**
+
+Replacing entire files or using naive string replacement becomes fragile and expensive (token-wise) on files containing hundreds of lines.
+
+*   **Search/Replace Blocks:** Implement a tool similar to Aider's `SEARCH/REPLACE` blocks. The AI outputs only the chunk of code being changed, preceded by the exact existing lines.
+*   **Unified Diff Output:** Allow the AI to output unified diffs that the backend applies locally. This drastically speeds up execution and prevents LLM truncation on large files.
+
+---
+
+## ✅ 3. Autonomous Execution & Self-Healing (Inspired by Cline)
+**Status: Implemented**
+
+*   **✅ Auto-Linting & Test Loops:** The agent can already run linters and tests via the `execute` tool, capture stderr/stdout, and iterate until the exit code is 0. This is part of the core agent loop.
+*   **✅ Browser Interaction:** Fully implemented in `tools/browser_tools.py` via Playwright + MS Edge. The agent can take screenshots, capture JS console logs, read the DOM, click elements, and detect failed network requests — all headlessly. Supports any URL (localhost or external). Screenshots render inline in the Chainlit UI.
+
+---
+
+## ⬜ 4. IDE Integration or Editor Proximity (Inspired by Cursor/Copilot)
+**Status: Not implemented**
+
+While Chainlit provides a beautiful UI, switching contexts between an IDE and a browser breaks developer flow.
+
+*   **VS Code / JetBrains Plugin:** Expose a local REST/WebSocket API from the AI Intern core and build a lightweight VS Code extension. This allows the AI to see the developer's exact cursor position, open tabs, and selected text.
+*   **Inline Code Completion:** Offer rapid, local autocomplete for inline suggestions (perhaps leveraging the existing Ollama integration) while reserving the complex reasoning API for the chat pane.
+
+---
+
+## ✅ 5. Advanced Version Control (Git) Integrations
+**Status: Implemented**
+
+Fully implemented in `tools/git_tools.py` via GitPython. 12 tools covering the complete Git lifecycle:
+
+*   **✅ Clone from remote URL:** `git_clone` — share any GitHub/GitLab URL and the agent clones it directly into the workspace.
+*   **✅ Contextual Commits:** `git_generate_commit_message` reads the staged diff and generates a conventional-commits style message. `git_commit` stages and commits.
+*   **✅ Safe Experimentation Mode:** `git_create_branch` lets the agent branch before risky changes. If the result is unwanted, the branch is discarded with no impact on `main`.
+*   **✅ Full read/write coverage:** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_checkout`, `git_push`, `git_pull`, `git_stash`.
+*   **✅ Approval gates:** Destructive tools (`git_commit`, `git_push`, `git_pull`, `git_checkout`) trigger the human-in-the-loop interrupt in the Chainlit UI before executing.
+
+---
+
+## ✅ 6. Dynamic Context Loading (File Drag-and-Drop)
+**Status: Implemented**
+
+Developers can drag and drop images directly into the Chainlit chat UI. The agent receives them as base64-encoded image content and can reason about them using vision models. External URL fetching is available via MCP tools (Tavily, DeepWiki).
+
+---
+
+## ✅ 7. Configuration and Rules (Project-Level Memory)
+**Status: Implemented**
+
+*   **✅ `.ai-intern-rules` file:** Implemented in `core/coding_assistant.py` via `_read_ai_intern_rules`. Place a `.ai-intern-rules` markdown file at the root of any target repository and it is automatically prepended to the system context for all queries in that project. An example template is provided at `.ai-intern-rules.example`.
+
+---
+
+## ✅ 8. Codebase Structure & Organisation
+**Status: Implemented**
+
+The project has been restructured from a flat root into a clean module layout:
+
+```
+core/       ← coding_assistant.py, llm_factory.py, mcp_client.py
+tools/      ← custom_tools.py, browser_tools.py, git_tools.py
+dashboard/  ← api.py, db.py, static/
+tests/      ← test_custom_tools.py, test_browser_tools.py, test_git_tools.py,
+               test_dashboard_db.py, test_llm_factory.py
+```
+
+---
+
+## ✅ 9. Test Coverage
+**Status: Implemented**
+
+57 pytest tests across 5 test files covering all major tool groups and the dashboard DB layer. Run with:
+
+```bash
+env/Scripts/pytest.exe tests/             # all non-browser tests (default)
+env/Scripts/pytest.exe tests/ -m browser  # live browser tests (needs a running server)
+```
+
+---
+
+## Remaining Roadmap
+
+| Priority | Item | Notes |
+|----------|------|-------|
+| High | Diff-based file editing (Search/Replace blocks) | Biggest token savings, most impactful for large files |
+| High | Vector search navigation (ChromaDB/FAISS) | Needed for large codebases where grep is too slow |
+| Medium | VS Code / JetBrains plugin | Requires building a separate extension |
+| Medium | Inline code completion (Ollama) | Needs a separate lightweight completion endpoint |
+| Low | Docker-based sandboxed execution | Isolates agent shell commands from host machine |
+| Low | PostgreSQL swap for multi-user deployments | SQLite is fine for single-user; Postgres needed for teams |

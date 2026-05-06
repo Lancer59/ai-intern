@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from dashboard_db import DB_PATH, DEFAULT_SYSTEM_PROMPT, get_config, save_config
+from dashboard.db import DB_PATH, DEFAULT_SYSTEM_PROMPT, get_config, save_config
 
 # ---------------------------------------------------------------------------
 # App instance

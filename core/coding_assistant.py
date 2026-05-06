@@ -1,17 +1,31 @@
 import os
 import pathlib
-from llm_factory import get_llm
+from core.llm_factory import get_llm
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend, CompositeBackend, StoreBackend
-from tools import think, read_package_source
-from browser_tools import (
+from tools.custom_tools import think, read_package_source
+from tools.browser_tools import (
     browser_screenshot,
     browser_get_console_logs,
     browser_get_dom,
     browser_click_and_screenshot,
     browser_get_network_errors,
 )
-from mcp_client import get_mcp_tools
+from tools.git_tools import (
+    git_clone,
+    git_status,
+    git_diff,
+    git_log,
+    git_blame,
+    git_commit,
+    git_create_branch,
+    git_checkout,
+    git_push,
+    git_pull,
+    git_stash,
+    git_generate_commit_message,
+)
+from core.mcp_client import get_mcp_tools
 import logging
 
 logger = logging.getLogger("coding_assistant")
@@ -181,6 +195,18 @@ async def create_coding_assistant(
         browser_get_dom,
         browser_click_and_screenshot,
         browser_get_network_errors,
+        git_clone,
+        git_status,
+        git_diff,
+        git_log,
+        git_blame,
+        git_commit,
+        git_create_branch,
+        git_checkout,
+        git_push,
+        git_pull,
+        git_stash,
+        git_generate_commit_message,
     ]
     all_tools = mcp_tools + core_tools
 
@@ -193,7 +219,7 @@ async def create_coding_assistant(
             logger.info(f"New tools not in stored config, adding: {new_tools}")
             enabled_set.update(new_tools)
             try:
-                from dashboard_db import get_config, save_config
+                from dashboard.db import get_config, save_config
                 cfg = await get_config()
                 # Merge: keep existing enabled state, add new tools as enabled
                 cfg["enabled_tools"] = list(enabled_set)
@@ -210,7 +236,7 @@ async def create_coding_assistant(
             logger.warning("Tool filter removed all MCP tools — stored names may be stale. Resetting config.")
             filtered = all_tools
             try:
-                from dashboard_db import get_config, save_config
+                from dashboard.db import get_config, save_config
                 cfg = await get_config()
                 cfg["enabled_tools"] = [t.name for t in all_tools]
                 await save_config(cfg)
