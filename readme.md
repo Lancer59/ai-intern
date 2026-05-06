@@ -10,10 +10,12 @@ A terminal & web-based AI coding assistant built on the [deepagents](https://git
 - **Deep Agent** — Powered by `deepagents` with built-in planning (`write_todos`), filesystem tools (`ls`, `read_file`, `write_file`, `edit_file`, `grep`, `glob`), shell execution, and sub-agent spawning.
 - **Model Context Protocol (MCP)** — Native integration via `langchain_mcp_adapters` to connect standard MCP servers (e.g., Microsoft Docs) for extended context.
 - **Custom Tooling Extensibility** — Includes robust custom tools (such as `think` for deep reasoning) loaded directly into the agent mapping.
+- **Semantic Code Search** — ChromaDB-backed vector search lets the agent find code by concept ("Where is the auth logic?") without needing exact filenames or grep patterns. Indexed locally using Ollama embeddings (no API key) with OpenAI fallback.
 - **Browser Interaction (Playwright + Edge)** — Five built-in browser tools let the agent visually verify frontend work: take screenshots, capture JS console logs, read the DOM, click elements, and detect failed network requests — all driven headlessly through your installed Microsoft Edge.
 - **Git Version Control** — 12 built-in Git tools let the agent clone repos from a URL, read diffs and history, commit its own work, branch safely before risky changes, push/pull to remotes, and generate AI-written commit messages.
 - **Chainlit Web UI** — Real-time token streaming, custom aesthetic tool step indicators ("Editing...", "Thinking..."), inline visual Diff and Terminal blocks, and a dynamic **Tasks** sidebar.
-- **Admin Dashboard** — Integrated FastAPI dashboard for observability (token usage, tool stats, LOC) and real-time agent configuration (system prompt, iteration limits).
+- **Admin Dashboard** — Integrated FastAPI dashboard for observability (token usage, tool stats, LOC) and real-time agent configuration (system prompt, iteration limits, per-tool enable/disable). All tools are tracked in `all_known_tools` so disabling a tool never removes it from the dashboard view.
+- **Prompt Debug Logging** — Set `DEBUG_PRINT_PROMPT=true` in `.env` to print the full prompt (per message block with char counts and token estimates) to stdout before every LLM call. Useful for diagnosing token waste.
 - **In-Memory Persistence** — Conversation memory is maintained across turns within a session via LangGraph's `MemorySaver` checkpointer with unique `thread_id`s.
 - **CLI Mode** — Lightweight terminal interface for quick interactions.
 
@@ -36,7 +38,8 @@ ai-intern/
 ├── tools/                   # All LangChain tools
 │   ├── custom_tools.py      # think, read_package_source
 │   ├── browser_tools.py     # Playwright browser tools (screenshot, DOM, console, network)
-│   └── git_tools.py         # Git tools (clone, diff, commit, push, branch, log, blame...)
+│   ├── git_tools.py         # Git tools (clone, diff, commit, push, branch, log, blame...)
+│   └── vector_search.py     # Semantic code search (ChromaDB + Ollama/OpenAI embeddings)
 │
 ├── dashboard/               # Admin dashboard
 │   ├── api.py               # FastAPI routes (observability + config endpoints)
@@ -142,11 +145,36 @@ edit_file → execute (npm run dev) → browser_screenshot
          → browser_get_console_logs → [errors found] → think → edit_file → ...
 ```
 
-**Self-healing loop example** — the agent can chain these tools automatically:
+---
 
-```
-edit_file → execute (npm run dev) → browser_screenshot
-         → browser_get_console_logs → [errors found] → think → edit_file → ...
+## Semantic Code Search
+
+The agent can search the codebase by meaning, not just by keyword. Useful for unfamiliar or large codebases where you don't know the exact filename or function name.
+
+| Tool | What it does |
+|------|-------------|
+| `semantic_code_search` | Find relevant code chunks by natural language query |
+| `rebuild_code_index` | Force a full re-index after large refactors |
+
+Example queries the agent can answer directly:
+- *"Where is the authentication logic?"*
+- *"Find the database connection setup"*
+- *"Which file handles payment processing?"*
+
+The index is built automatically on first use and persisted in `agent_data/chroma/`. Subsequent sessions load it from disk instantly.
+
+**Embedding backends (in priority order):**
+1. Ollama `nomic-embed-text` — fully local, zero cost, zero API key
+2. OpenAI `text-embedding-3-small` — automatic fallback if Ollama isn't running
+
+**Setup:**
+```bash
+pip install langchain-chroma chromadb langchain-text-splitters
+
+# For local embeddings (recommended — no API key needed):
+ollama pull nomic-embed-text
+
+# Or just set OPENAI_API_KEY and it falls back automatically
 ```
 
 ---
@@ -222,6 +250,51 @@ llm = get_llm(provider="google")     # Google Gemini
 llm = get_llm(provider="ollama")     # Local Ollama
 ```
 
+For models that require the OpenAI **Responses API** instead of Chat Completions (e.g. `codex-mini-latest`, `o3`, `o4-mini` with extended thinking), pass `use_responses_api=True`:
+
+```python
+llm = get_llm(provider="openai", model_name="codex-mini-latest", use_responses_api=True)
+```
+
+### Agent Middleware
+
+The agent runs with middleware layers applied automatically:
+
+| Middleware | What it does |
+|---|---|
+| `SummarizationMiddleware` | Auto-summarises old messages when token count exceeds `SUMMARIZATION_TOKEN_TRIGGER` — keeps long sessions alive |
+| `PIIMiddleware` (email, credit card) | Redacts PII before it reaches the LLM |
+| `PIIMiddleware` (password, secret_key) | Redacts passwords, `client_secret`, API keys, and tokens found in code files |
+| `ModelRetryMiddleware` | Retries transient LLM API failures (rate limits, 503s) with exponential backoff |
+| `ToolRetryMiddleware` | Retries transient tool failures (browser, git, MCP network blips) |
+
+### Tool Enable / Disable
+
+Tools can be toggled on/off from the dashboard Settings page. The full list of known tools is always shown — disabling a tool removes it from the agent's active tool list but keeps it visible in the dashboard. New tools added to the codebase are automatically discovered on the next session start and added as enabled by default.
+
+### Prompt Debug Logging
+
+To see exactly what is sent to the LLM on every call (useful for diagnosing token waste):
+
+```bash
+# .env
+DEBUG_PRINT_PROMPT=true
+```
+
+Output shows each message block with char count, estimated tokens, and a note about tool schema overhead (tool schemas are sent separately by the API and account for ~200 tokens per tool).
+
+### Summarization Token Trigger
+
+The summarization middleware uses absolute token counts (fractional limits require model profile metadata not available on all deployments):
+
+```bash
+# .env — set to ~75% of your model's context window
+SUMMARIZATION_TOKEN_TRIGGER=100000   # gpt-4o / gpt-4.1 (128k)
+SUMMARIZATION_KEEP_MESSAGES=30
+```
+
+Common values: gpt-5 / gpt-5.3-instant (128k) → `100000`, gpt-5.3-codex (200k+) → `150000`, gpt-5.4 (1M) → `750000`.
+
 ### Persistent Memory (Production)
 
 Conversation history and agent state are persisted to SQLite automatically:
@@ -247,6 +320,10 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 | `CHAINLIT_AUTH_SECRET` | Yes | Secret for Chainlit cookie auth |
 | `CHAINLIT_USER` | Yes | Login username |
 | `CHAINLIT_PASSWORD` | Yes | Login password |
+| `DEBUG_PRINT_PROMPT` | No | Set `true` to print full prompt + token estimates before every LLM call |
+| `SUMMARIZATION_TOKEN_TRIGGER` | No | Token count that triggers summarization (default `100000`) |
+| `SUMMARIZATION_KEEP_MESSAGES` | No | Messages to keep after summarization (default `30`) |
+| `OLLAMA_BASE_URL` | For Ollama | Ollama server URL (default `http://localhost:11434`) |
 
 ---
 
@@ -256,15 +333,17 @@ To use PostgreSQL in production, swap `SQLAlchemyDataLayer` conninfo and `AsyncS
 - [ ] Project-level `AGENTS.md` for persistent context
 - [ ] Agent skills which can be added dynamically
 - [ ] Set iteration limit dynamically for each query
-- [x] git tools so the coding agent can push code
-- [ ] Swap SQLite for PostgreSQL for multi-user production deployments
-- [ ] checkpointer in conversation 
 - [x] Git tooling (clone, diff, commit, push, pull, branch, blame, stash, AI commit messages)
 - [x] See content from python files of packages within the code base
+- [x] Semantic code search (ChromaDB + Ollama/OpenAI embeddings)
+- [x] Browser interaction tools (Playwright + MS Edge)
+- [x] Agent middleware (summarization, PII redaction, retries)
+- [x] Prompt debug logging (`DEBUG_PRINT_PROMPT`)
+- [x] Tool enable/disable with persistent `all_known_tools` tracking
+- [ ] Swap SQLite for PostgreSQL for multi-user production deployments
 - [ ] Trust command (user based auth)
-- [ ] Unable to replace text trying different approach
-- [ ] Optimized for building requirements and technical documentation 
-- [ ] Extend configurability (Ex: add edge/chrome option for playwright)
+- [ ] Optimized for building requirements and technical documentation
+- [ ] Extend configurability (e.g. add edge/chrome option for playwright)
 ---
 
 ## License

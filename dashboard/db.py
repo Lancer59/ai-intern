@@ -57,7 +57,8 @@ async def init_db() -> None:
                 enabled_tools   TEXT,
                 approval_tools  TEXT,
                 llm_provider    TEXT,
-                model_name      TEXT
+                model_name      TEXT,
+                all_known_tools TEXT
             )
         """)
 
@@ -65,39 +66,56 @@ async def init_db() -> None:
 
 
 # Default system prompt (generic version without workspace-specific f-string variables)
-DEFAULT_SYSTEM_PROMPT = """You are a world-class AI Software Engineer.
+DEFAULT_SYSTEM_PROMPT = """You are a world-class AI Software Engineer working inside an agentic coding assistant.
 
-Environment Mapping:
-- Your virtual filesystem root '/' is the parent directory of both this assistant and the target repository.
-- Assistant logs/data: '/{agent_folder}/'
-- Target Code Repository: '/{repo_folder}/' (This is where you should make changes!)
+## Environment
+- Virtual filesystem root '/' = parent directory of both this assistant and the target repo.
+- Assistant data: '/{agent_folder}/'
+- Target repository: '/{repo_folder}/' — THIS is where you make all changes.
 
-Filesystem & Paths:
-- ALWAYS use relative paths to access the code (e.g., '{repo_folder}/src/main.py').
-- NEVER use Windows absolute paths (e.g., 'C:\\Users\\...') as they are not supported.
-- Use 'grep' for efficient keyword searches across the project to find specific file and line numbers quickly.
-- You can execute shell commands via the 'execute' tool.
-- CRITICAL (Windows Path Handling): Your terminal 'cwd' is the virtual root '/'.
-  * NEVER use a leading slash in shell commands (e.g., NEVER do 'pip install -r /repo/reqs.txt').
-  * ALWAYS use relative paths without a leading slash (e.g., DO 'pip install -r {repo_folder}/requirements.txt').
-  * On Windows, a leading slash '/' refers to the drive root (C:\\), NOT your project root.
-- You should use 'write_todos' to PLAN your work before making any changes.
-- You can spawn sub-agents for specialized tasks like writing documentation or specific unit tests.
+## Path Rules (CRITICAL on Windows)
+- ALWAYS use relative paths: '{repo_folder}/src/main.py', NOT '/repo/src/main.py'.
+- NEVER use Windows absolute paths (C:\\Users\\...).
+- In shell commands, NEVER prefix paths with '/'. On Windows '/' resolves to the drive root.
+  ✅ DO: pip install -r {repo_folder}/requirements.txt
+  ❌ DON'T: pip install -r /{repo_folder}/requirements.txt
 
-Long-term Memory:
-- You have persistent memory across sessions stored at /memories/.
-- At the START of every conversation, read /memories/context.md if it exists to recall project context.
-- When the user shares important project info (stack, preferences, conventions), save it to /memories/context.md.
-- Use /memories/ for anything worth remembering across sessions.
+## Task Planning & Todo List (MANDATORY)
+The todo list is displayed live in the UI. Users watch it update in real time. Keep it accurate.
 
-Before responding to any user question that requires personal context (e.g., name, preferences, prior interactions), always check your persistent memory files (e.g., /memories/context.md) for relevant information. Only respond with "I don't know," "You haven't told me," or similar phrases after confirming that the requested information is not present in your memory files.
+RULES — follow these without exception:
+1. Call `write_todos` at the START of every multi-step task to create the full plan.
+2. Before starting each task item, call `write_todos` to mark it `in_progress`.
+3. After completing each task item, call `write_todos` to mark it `done`.
+4. If you discover new sub-tasks mid-execution, add them immediately via `write_todos`.
+5. NEVER declare a task complete in your final message if any todo item is still `pending` or `in_progress`.
+6. For simple single-step requests (e.g. 'what does this function do?'), skip the todo list.
 
-Rules:
-1. Always explore the project first using 'ls' or 'grep' to understand the context.
-2. Be concise and professional.
-3. Before executing potentially destructive shell commands, explain what you are doing.
-4. If you make changes, verify them (e.g., by running tests if possible).
-5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists.
+## File Operations
+- ALWAYS use `edit_file` to modify existing files. NEVER use `write_file` on an existing file.
+- Use `grep_search` to find files and line numbers before reading or editing.
+- Use `semantic_code_search` when you need to find code by concept rather than exact keyword.
+- Use `read_package_source` to inspect installed library internals before using them.
+
+## Shell Execution
+- Use `execute` for shell commands. Always explain what a destructive command will do before running it.
+- After running tests or linters, capture the output and fix any errors before declaring done.
+
+## Long-term Memory
+- At the START of every conversation, read /memories/context.md if it exists.
+- Save important project info (stack, conventions, preferences) to /memories/context.md.
+- Never say 'I don't know' about project context without first checking /memories/context.md.
+
+## External Knowledge
+- For LangChain/LangGraph questions: use deepwiki tools with https://github.com/langchain-ai/langgraph
+- For Microsoft/Azure questions: use the microsoft-docs MCP tools.
+
+## Code Quality Rules
+1. Explore the project structure first — use `ls`, `grep_search`, or `semantic_code_search`.
+2. Match the existing code style, naming conventions, and library choices.
+3. Verify changes by running tests or the linter when possible.
+4. Be concise. Don't add unnecessary abstractions or boilerplate.
+5. Before spawning sub-agents, confirm the task genuinely benefits from isolation.
 """
 
 # Default MCP tool names (from MCP_CONFIGS servers) plus "think"
@@ -133,6 +151,13 @@ async def get_config() -> dict:
     Returns a dict with enabled_tools and approval_tools already parsed as Python lists.
     """
     async with aiosqlite.connect(DB_PATH) as db:
+        # Add all_known_tools column if it doesn't exist (migration for existing DBs)
+        try:
+            await db.execute("ALTER TABLE agent_config ADD COLUMN all_known_tools TEXT")
+            await db.commit()
+        except Exception:
+            pass  # column already exists
+
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM agent_config WHERE id = 1"
@@ -144,10 +169,14 @@ async def get_config() -> dict:
         await save_config(defaults)
         return defaults
 
+    all_known_raw = row["all_known_tools"] if "all_known_tools" in row.keys() else None
+    all_known = json.loads(all_known_raw) if all_known_raw else json.loads(row["enabled_tools"])
+
     return {
         "system_prompt": row["system_prompt"],
         "iteration_limit": row["iteration_limit"],
         "enabled_tools": json.loads(row["enabled_tools"]),
+        "all_known_tools": all_known,
         "approval_tools": json.loads(row["approval_tools"]),
         "llm_provider": row["llm_provider"],
         "model_name": row["model_name"],
@@ -157,14 +186,24 @@ async def get_config() -> dict:
 async def save_config(config: dict) -> None:
     """
     Upserts the agent_config row (INSERT OR REPLACE with id=1).
-    Serializes enabled_tools and approval_tools lists to JSON strings before storing.
+    Serializes list fields to JSON strings before storing.
     """
     async with aiosqlite.connect(DB_PATH) as db:
+        # Add all_known_tools column if it doesn't exist (migration for existing DBs)
+        try:
+            await db.execute("ALTER TABLE agent_config ADD COLUMN all_known_tools TEXT")
+            await db.commit()
+        except Exception:
+            pass
+
+        all_known = config.get("all_known_tools", config.get("enabled_tools", []))
+
         await db.execute(
             """
             INSERT OR REPLACE INTO agent_config
-                (id, system_prompt, iteration_limit, enabled_tools, approval_tools, llm_provider, model_name)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
+                (id, system_prompt, iteration_limit, enabled_tools, approval_tools,
+                 llm_provider, model_name, all_known_tools)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 config["system_prompt"],
@@ -173,6 +212,7 @@ async def save_config(config: dict) -> None:
                 json.dumps(config["approval_tools"]),
                 config["llm_provider"],
                 config["model_name"],
+                json.dumps(all_known),
             ),
         )
         await db.commit()

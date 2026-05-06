@@ -5,10 +5,10 @@ Based on an analysis of current market leaders in AI-assisted development (such 
 ---
 
 ## ✅ 1. Deep Context & Codebase Understanding (Inspired by Cursor & Aider)
-**Status: Partially implemented**
+**Status: Fully implemented**
 
 *   **✅ Semantic Repository Map:** A lightweight file-tree based repo map is generated at session start and injected into the system prompt (`_build_repo_map` in `core/coding_assistant.py`). The agent knows the full file structure without needing to manually `ls`.
-*   **⬜ Vector Search Navigation:** Not yet implemented. Integrating a local embedder (like `ChromaDB` or `FAISS`) would allow semantic search — e.g. "Where is the authentication logic?" — jumping directly to relevant files without grep.
+*   **✅ Vector Search Navigation:** Implemented in `tools/vector_search.py`. Two tools added: `semantic_code_search` (find code by concept — "Where is the auth logic?") and `rebuild_code_index` (force re-index after large refactors). Uses ChromaDB with a persistent index in `agent_data/chroma/`. Embeddings use Ollama (`nomic-embed-text`) locally with automatic fallback to OpenAI `text-embedding-3-small`.
 
 ---
 

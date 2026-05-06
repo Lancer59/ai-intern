@@ -65,7 +65,11 @@ def _default_dates(start: Optional[str], end: Optional[str]):
 
 @dashboard_app.get("/dashboard/api/config")
 async def api_get_config():
-    return await get_config()
+    config = await get_config()
+    # Enrich with all_tools_known so the dashboard can show every tool,
+    # not just the ones currently in enabled_tools.
+    # The frontend uses enabled_tools to determine checked state.
+    return config
 
 
 @dashboard_app.put("/dashboard/api/config")
@@ -86,12 +90,12 @@ async def api_put_config(body: dict):
             detail="system_prompt must be a non-empty string.",
         )
 
-    # Validate enabled_tools
+    # Validate enabled_tools — allow empty list (user explicitly disabled all tools)
     enabled_tools = body.get("enabled_tools")
-    if not isinstance(enabled_tools, list) or len(enabled_tools) < 1:
+    if not isinstance(enabled_tools, list):
         raise HTTPException(
             status_code=422,
-            detail="enabled_tools must be a list with at least 1 item.",
+            detail="enabled_tools must be a list.",
         )
 
     # Merge with existing config so read-only fields (llm_provider, model_name) are preserved

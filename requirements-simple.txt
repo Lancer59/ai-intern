@@ -10,3 +10,6 @@ aiosqlite
 SQLAlchemy
 playwright>=1.44.0
 gitpython>=3.1.40
+# langchain-chroma>=0.2.0
+# langchain-text-splitters>=0.3.0
+# chromadb>=0.6.0

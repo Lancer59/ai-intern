@@ -20,7 +20,8 @@ ai-intern/
 ├── tools/                   # All LangChain tools
 │   ├── custom_tools.py      # think, read_package_source
 │   ├── browser_tools.py     # Playwright browser tools
-│   └── git_tools.py         # Git tools (GitPython)
+│   ├── git_tools.py         # Git tools (GitPython)
+│   └── vector_search.py     # Semantic code search (ChromaDB + embeddings)
 │
 ├── dashboard/               # Admin dashboard
 │   ├── api.py               # FastAPI routes
@@ -33,8 +34,12 @@ ai-intern/
 
 ## Capabilities
 - **Autonomous Planning**: Through `write_todos` and LangGraph checkpointing, the agent maintains an up-to-date plan of action in a structured task list visible in the web UI.
-- **Multi-Provider LLM Access**: Abstracted via `llm_factory.py`, seamlessly switch between Azure OpenAI, standard OpenAI, Google Gemini, and local Ollama models.
+- **Multi-Provider LLM Access**: Abstracted via `llm_factory.py`, seamlessly switch between Azure OpenAI, standard OpenAI, Google Gemini, and local Ollama models. Supports `use_responses_api=True` for models that require the OpenAI Responses API (e.g. `codex-mini-latest`, `o3`, `o4-mini`).
+- **Agent Middleware**: Five middleware layers run automatically — `SummarizationMiddleware` (auto-compresses context when token count exceeds `SUMMARIZATION_TOKEN_TRIGGER`), `PIIMiddleware` (redacts emails, credit cards, passwords, API keys/tokens from code), `ModelRetryMiddleware` (retries LLM rate limits/503s), and `ToolRetryMiddleware` (retries transient tool failures).
+- **Tool Management**: All tools are registered in `all_known_tools` in the dashboard DB on every startup. The dashboard shows the full list regardless of enabled state. New tools added to the codebase are auto-discovered and added as enabled. Disabling a tool removes it from the active agent tool list without losing it from the dashboard view.
+- **Prompt Debug Logging**: `PromptDebugCallback` in `llm_factory.py` prints the full prompt (per block with char counts and token estimates) when `DEBUG_PRINT_PROMPT=true`. Helps identify token waste from system prompt, repo map, or conversation history.
 - **Filesystem & Shell Mastery**: Uses `LocalShellBackend` to safely construct a virtual workspace environment. Capable of exploration (`ls`, `find_by_name`), file manipulation (`read_file`, `write_file`, `edit_file`), full-text search (`grep_search`), and executing terminal commands (`execute`).
+- **Semantic Code Search**: Via `tools/vector_search.py`, the agent can search the codebase by meaning using ChromaDB and local embeddings. Answers queries like "Where is the authentication logic?" by returning the most relevant code chunks. Index is persisted in `agent_data/chroma/` and rebuilt on demand.
 - **Browser Interaction**: Via `tools/browser_tools.py`, the agent can drive a headless Microsoft Edge browser (Playwright) to take screenshots, capture JS console logs, read the DOM, click elements, and detect failed network requests — enabling autonomous frontend verification without human DevTools intervention.
 - **Git Version Control**: Via `tools/git_tools.py`, the agent has full Git awareness — it can clone a repo from any remote URL, read diffs and history, commit its own work with AI-generated messages, branch safely before risky changes, push/pull to remotes, stash work, and inspect blame.
 - **Model Context Protocol (MCP)**: Native integration via `core/mcp_client.py` allows the agent to connect automatically to standardized external APIs and context servers (e.g., Microsoft Docs MCP Server) and invoke them seamlessly as built-in tools.
@@ -54,10 +59,14 @@ graph TD
     Dash --> DashAPI[Dashboard API / app.py]
 
     subgraph Core Components
-        Assistant --> llm_factory[LLM Factory]
+        Assistant --> llm_factory[LLM Factory + PromptDebugCallback]
         llm_factory --> Model[(LLM: Azure/OpenAI/Gemini/Ollama)]
         Assistant --> memory_saver[LangGraph Checkpointer MemorySaver]
         Assistant --> telemetry[Telemetry Recorder]
+        Assistant --> middleware[Middleware Stack]
+        middleware --> summarization[SummarizationMiddleware]
+        middleware --> pii[PIIMiddleware x4]
+        middleware --> retries[ModelRetry + ToolRetry]
     end
 
     subgraph Persistence
@@ -81,6 +90,9 @@ graph TD
         mcp -.-> mcp_servers((External MCP Servers))
 
         Assistant --> custom_tools[Custom Tools / think / read_package_source]
+
+        Assistant --> vector_search[Vector Search / ChromaDB]
+        vector_search --> chroma_db[(agent_data/chroma/)]
     end
 
     DashAPI --> dash_db
@@ -138,6 +150,14 @@ All browser tools default to `allow_external=True` (any URL). Set `allow_externa
 | `git_generate_commit_message` | AI | Read staged diff and generate a conventional-commits message |
 
 Write tools (`git_commit`, `git_push`, `git_pull`, `git_checkout`) trigger the human-in-the-loop approval interrupt in the Chainlit UI before executing.
+
+### Semantic Code Search (`tools/vector_search.py`) — ChromaDB
+| Tool | Description |
+|------|-------------|
+| `semantic_code_search` | Find relevant code chunks by natural language query (e.g. "Where is the auth logic?") |
+| `rebuild_code_index` | Force a full re-index of the workspace after large refactors |
+
+Index is persisted in `agent_data/chroma/`. Embedding backends: Ollama `nomic-embed-text` (local, no API key) → OpenAI `text-embedding-3-small` (fallback).
 
 ### MCP Tools (`core/mcp_client.py`)
 Dynamically loaded at startup from configured MCP servers (e.g., Microsoft Docs, Tavily search). Registered alongside all other tools in the agent's tool list.

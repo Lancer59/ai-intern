@@ -25,10 +25,48 @@ from tools.git_tools import (
     git_stash,
     git_generate_commit_message,
 )
+# For now vector DB functionality is commented, will be used once required.
+# from tools.vector_search import semantic_code_search, rebuild_code_index
 from core.mcp_client import get_mcp_tools
+from langchain.agents.middleware import (
+    SummarizationMiddleware,
+    PIIMiddleware,
+    ModelRetryMiddleware,
+    ToolRetryMiddleware,
+)
+import re
 import logging
 
 logger = logging.getLogger("coding_assistant")
+
+# ---------------------------------------------------------------------------
+# Custom PII detectors for secrets commonly found in codebases
+# ---------------------------------------------------------------------------
+
+# Matches: password = "...", PASSWORD="...", passwd: '...', etc.
+_PASSWORD_RE = re.compile(
+    r'(?i)(password|passwd|pwd|secret|client_secret|db_password|db_pass)\s*[:=]\s*["\']([^"\']{4,})["\']'
+)
+
+def _detect_passwords(content: str) -> list[dict]:
+    return [
+        {"text": m.group(2), "start": m.start(2), "end": m.end(2)}
+        for m in _PASSWORD_RE.finditer(content)
+        if m.group(2).lower() not in ("", "your_password_here", "changeme", "xxxx")
+    ]
+
+# Matches common secret key patterns: sk-..., ghp_..., xoxb-..., AKIA..., etc.
+_SECRET_KEY_RE = re.compile(
+    r'\b(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|'
+    r'xoxb-[0-9A-Za-z\-]{50,}|AKIA[0-9A-Z]{16}|'
+    r'[A-Za-z0-9+/]{40,}={0,2})\b'  # generic long base64-ish tokens
+)
+
+def _detect_secret_keys(content: str) -> list[dict]:
+    return [
+        {"text": m.group(0), "start": m.start(), "end": m.end()}
+        for m in _SECRET_KEY_RE.finditer(content)
+    ]
 
 # Directories to skip when building the repo map
 _SKIP_DIRS = {
@@ -117,6 +155,7 @@ async def create_coding_assistant(
         os.makedirs(workspace_path)
 
     llm = get_llm(provider="azure")
+    # llm = get_llm(provider="openai", model_name="codex-mini-latest", use_responses_api=True)
 
     persistence_path = "deepagents_data"
     if not os.path.exists(persistence_path):
@@ -140,46 +179,55 @@ async def create_coding_assistant(
         resolved_prompt += repo_map_section + rules_section
     else:
         resolved_prompt = (
-            "You are a world-class AI Software Engineer.\n\n"
-            "Environment Mapping:\n"
-            f"- Your virtual filesystem root '/' is the parent directory of both this assistant and the target repository.\n"
-            f"- Assistant logs/data: '/{agent_folder}/'\n"
-            f"- Target Code Repository: '/{repo_folder}/' (This is where you should make changes!)\n\n"
-            "Filesystem & Paths:\n"
-            f"- ALWAYS use relative paths to access the code (e.g., '{repo_folder}/src/main.py').\n"
-            "- NEVER use Windows absolute paths (e.g., 'C:\\Users\\...') as they are not supported.\n"
-            "- Use 'grep' for efficient keyword searches across the project to find specific file and line numbers quickly.\n"
-            "- You can execute shell commands via the 'execute' tool.\n"
-            "- CRITICAL (Windows Path Handling): Your terminal 'cwd' is the virtual root '/'.\n"
-            "  * NEVER use a leading slash in shell commands (e.g., NEVER do 'pip install -r /repo/reqs.txt').\n"
-            f"  * ALWAYS use relative paths without a leading slash (e.g., DO 'pip install -r {repo_folder}/requirements.txt').\n"
-            "  * On Windows, a leading slash '/' refers to the drive root (C:\\), NOT your project root.\n"
-            "- You should use 'write_todos' to PLAN your work before making any changes.\n"
-            "- You can spawn sub-agents for specialized tasks like writing documentation or specific unit tests.\n\n"
-            "Long-term Memory:\n"
-            "- You have persistent memory across sessions stored at /memories/.\n"
-            "- At the START of every conversation, read /memories/context.md if it exists to recall project context.\n"
-            "- When the user shares important project info (stack, preferences, conventions), save it to /memories/context.md.\n"
-            "- Use /memories/ for anything worth remembering across sessions.\n\n"
-            "Before responding to any user question that requires personal context (e.g., name, preferences, prior interactions), "
-            "always check your persistent memory files (e.g., /memories/context.md) for relevant information. "
-            "Only respond with \"I don't know,\" \"You haven't told me,\" or similar phrases after confirming that the requested information is not present in your memory files.\n\n"
-            "For any langchain, langgraph related code:\n"
-            "https://github.com/langchain-ai/langgraph\n"
-            "https://github.com/langchain-ai/langchain\n"
-            "Use deepwiki tools with this\n\n"
-            "For anything related to Microsoft:\n"
-            "Use the microsoft-docs tools\n\n"
-            "Package Source Inspection:\n"
-            "- Use the 'read_package_source' tool to read the source code of any installed package.\n"
-            "- Example: read_package_source('langgraph.prebuilt.chat_agent_executor') to see how create_react_agent is implemented.\n"
-            "- Use this BEFORE implementing anything that depends on a library's internals — don't guess, read the source.\n\n"
-            "Rules:\n"
-            "1. Always explore the project first using 'ls' or 'grep' to understand the context.\n"
-            "2. Be concise and professional.\n"
-            "3. Before executing potentially destructive shell commands, explain what you are doing.\n"
-            "4. If you make changes, verify them (e.g., by running tests if possible).\n"
-            "5. ALWAYS use 'edit_file' to modify existing files. NEVER use 'write_file' on a file that already exists.\n"
+            "You are a world-class AI Software Engineer working inside an agentic coding assistant.\n\n"
+
+            "## Environment\n"
+            f"- Virtual filesystem root '/' = parent directory of both this assistant and the target repo.\n"
+            f"- Assistant data: '/{agent_folder}/'\n"
+            f"- Target repository: '/{repo_folder}/' — THIS is where you make all changes.\n\n"
+
+            "## Path Rules (CRITICAL on Windows)\n"
+            f"- ALWAYS use relative paths: '{repo_folder}/src/main.py', NOT '/repo/src/main.py'.\n"
+            "- NEVER use Windows absolute paths (C:\\Users\\...).\n"
+            "- In shell commands, NEVER prefix paths with '/'. On Windows '/' resolves to the drive root.\n"
+            f"  ✅ DO: pip install -r {repo_folder}/requirements.txt\n"
+            f"  ❌ DON'T: pip install -r /{repo_folder}/requirements.txt\n\n"
+
+            "## Task Planning & Todo List (MANDATORY)\n"
+            "The todo list is displayed live in the UI. Users watch it update in real time. Keep it accurate.\n\n"
+            "RULES — follow these without exception:\n"
+            "1. Call `write_todos` at the START of every multi-step task to create the full plan.\n"
+            "2. Before starting each task item, call `write_todos` to mark it `in_progress`.\n"
+            "3. After completing each task item, call `write_todos` to mark it `done`.\n"
+            "4. If you discover new sub-tasks mid-execution, add them immediately via `write_todos`.\n"
+            "5. NEVER declare a task complete in your final message if any todo item is still `pending` or `in_progress`.\n"
+            "6. For simple single-step requests (e.g. 'what does this function do?'), skip the todo list.\n\n"
+
+            "## File Operations\n"
+            "- ALWAYS use `edit_file` to modify existing files. NEVER use `write_file` on an existing file.\n"
+            "- Use `grep_search` to find files and line numbers before reading or editing.\n"
+            "- Use `semantic_code_search` when you need to find code by concept rather than exact keyword.\n"
+            "- Use `read_package_source` to inspect installed library internals before using them.\n\n"
+
+            "## Shell Execution\n"
+            "- Use `execute` for shell commands. Always explain what a destructive command will do before running it.\n"
+            "- After running tests or linters, capture the output and fix any errors before declaring done.\n\n"
+
+            "## Long-term Memory\n"
+            "- At the START of every conversation, read /memories/context.md if it exists.\n"
+            "- Save important project info (stack, conventions, preferences) to /memories/context.md.\n"
+            "- Never say 'I don't know' about project context without first checking /memories/context.md.\n\n"
+
+            "## External Knowledge\n"
+            "- For LangChain/LangGraph questions: use deepwiki tools with https://github.com/langchain-ai/langgraph\n"
+            "- For Microsoft/Azure questions: use the microsoft-docs MCP tools.\n\n"
+
+            "## Code Quality Rules\n"
+            "1. Explore the project structure first — use `ls`, `grep_search`, or `semantic_code_search`.\n"
+            "2. Match the existing code style, naming conventions, and library choices.\n"
+            "3. Verify changes by running tests or the linter when possible.\n"
+            "4. Be concise. Don't add unnecessary abstractions or boilerplate.\n"
+            "5. Before spawning sub-agents, confirm the task genuinely benefits from isolation.\n"
         ) + repo_map_section + rules_section
 
     logger.info("Fetching MCP tools...")
@@ -190,6 +238,9 @@ async def create_coding_assistant(
     core_tools = [
         think,
         read_package_source,
+        # Below vector DB tools are commented for now as Embedding model has not been configured.
+        # semantic_code_search,
+        # rebuild_code_index,
         browser_screenshot,
         browser_get_console_logs,
         browser_get_dom,
@@ -210,41 +261,41 @@ async def create_coding_assistant(
     ]
     all_tools = mcp_tools + core_tools
 
+    # Always persist the full known tool list so the dashboard can show all tools,
+    # even those the user has disabled.
+    try:
+        from dashboard.db import get_config, save_config
+        cfg = await get_config()
+        cfg["all_known_tools"] = [t.name for t in all_tools]
+        await save_config(cfg)
+    except Exception as e:
+        logger.warning(f"Could not persist all_known_tools: {e}")
+
     if enabled_tools is not None:
         enabled_set = set(enabled_tools)
-        # Check if any new tools are missing from the stored list and add them
-        all_tool_names = [t.name for t in all_tools]
+        all_tool_names = {t.name for t in all_tools}
+
+        # Add genuinely new tools (ones that didn't exist when config was last saved)
+        # as enabled by default, so they appear in the dashboard.
         new_tools = [n for n in all_tool_names if n not in enabled_set]
         if new_tools:
-            logger.info(f"New tools not in stored config, adding: {new_tools}")
+            logger.info(f"New tools discovered, adding to config as enabled: {new_tools}")
             enabled_set.update(new_tools)
             try:
                 from dashboard.db import get_config, save_config
                 cfg = await get_config()
-                # Merge: keep existing enabled state, add new tools as enabled
                 cfg["enabled_tools"] = list(enabled_set)
+                cfg["all_known_tools"] = list(all_tool_names)
                 await save_config(cfg)
             except Exception as e:
                 logger.warning(f"Could not sync new tool names to config: {e}")
 
         def _tool_allowed(t):
-            return t.name in enabled_set or any(t.name.startswith(p) for p in enabled_set)
+            return t.name in enabled_set
+
         filtered = [t for t in all_tools if _tool_allowed(t)]
-        # Self-heal: if stale group names wiped all MCP tools, reset to all
-        mcp_filtered = [t for t in filtered if t.name not in {c.name for c in core_tools}]
-        if len(mcp_filtered) == 0 and len(mcp_tools) > 0:
-            logger.warning("Tool filter removed all MCP tools — stored names may be stale. Resetting config.")
-            filtered = all_tools
-            try:
-                from dashboard.db import get_config, save_config
-                cfg = await get_config()
-                cfg["enabled_tools"] = [t.name for t in all_tools]
-                await save_config(cfg)
-                logger.info(f"Reset enabled_tools in config: {cfg['enabled_tools']}")
-            except Exception as e:
-                logger.warning(f"Could not reset tool names in config: {e}")
+        logger.info(f"Tools active ({len(filtered)}): {[t.name for t in filtered]}")
         all_tools = filtered
-        logger.info(f"Tools filtered to: {[t.name for t in all_tools]}")
 
     if approval_tools is not None:
         interrupt_on = {name: {"allowed_decisions": ["approve", "reject"]} for name in approval_tools}
@@ -270,6 +321,31 @@ async def create_coding_assistant(
         store=store,
         tools=all_tools,
         interrupt_on=interrupt_on,
+        middleware=[
+            # Auto-summarise old messages when the conversation approaches the
+            # model's context limit — keeps long coding sessions from failing.
+            # TOKEN LIMIT: set SUMMARIZATION_TOKEN_TRIGGER in .env to match your
+            # model's context window (default 100000 for gpt-4o / 128k models).
+            # Use absolute token counts — fractional limits require model profile
+            # metadata that Azure/custom deployments don't always expose.
+            SummarizationMiddleware(
+                model=llm,
+                trigger=("tokens", int(os.getenv("SUMMARIZATION_TOKEN_TRIGGER", "100000"))),
+                keep=("messages", int(os.getenv("SUMMARIZATION_KEEP_MESSAGES", "30"))),
+            ),
+            # Redact common PII patterns before they reach the LLM or logs.
+            PIIMiddleware("email", strategy="redact", apply_to_input=True),
+            PIIMiddleware("credit_card", strategy="mask", apply_to_input=True),
+            # Redact passwords and client secrets found in codebase files.
+            # Catches: password="...", client_secret='...', passwd: "..." etc.
+            PIIMiddleware("password", detector=_detect_passwords, strategy="redact", apply_to_input=True),
+            # Catches: OpenAI keys (sk-...), GitHub tokens (ghp_...), AWS keys (AKIA...), etc.
+            PIIMiddleware("secret_key", detector=_detect_secret_keys, strategy="redact", apply_to_input=True),
+            # Retry transient model API failures (rate limits, 503s) with backoff.
+            ModelRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0),
+            # Retry transient tool failures (network blips in browser/git/MCP tools).
+            ToolRetryMiddleware(max_retries=2, backoff_factor=1.5, initial_delay=0.5),
+        ],
     )
 
     # Store iteration_limit so assistant_ui.py can use it as recursion_limit

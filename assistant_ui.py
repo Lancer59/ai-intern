@@ -237,6 +237,7 @@ async def main(message: cl.Message):
                         "git_create_branch": "🌿 Creating branch...", "git_checkout": "🔀 Checking out...",
                         "git_push": "🚀 Pushing...", "git_pull": "⬇️ Pulling...",
                         "git_stash": "📦 Stashing...", "git_generate_commit_message": "✍️ Generating commit message...",
+                        "semantic_code_search": "🔭 Semantic search...", "rebuild_code_index": "🗂️ Rebuilding index...",
                     }
                     display_name = f"{display_map.get(tool_name, f'Tool: {tool_name}')} {tool_input or ''}"
                     step = cl.Step(name=display_name, type="tool", parent_id=stream_msg.id)
